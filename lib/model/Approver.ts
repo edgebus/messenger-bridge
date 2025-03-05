@@ -14,7 +14,7 @@ export namespace Approver {
 		readonly source: "telegram";
 		readonly username: string;
 		readonly chat_id: string;
-		readonly chat_title: string;
+		// readonly chat_title: string;
 		readonly chat_type: string;
 		readonly message_id: number;
 	}

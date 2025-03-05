@@ -391,7 +391,7 @@ export class TelegramMessenger extends Messenger {
 		for (const update of updatesData) {
 			try {
 				if (update.message !== undefined) {
-					console.log(update.message);
+					logger.info(`Got a message: ${JSON.stringify(update.message)}`);
 				} else if (update.callback_query !== undefined) {
 					await this._onUpdateCallbackQuery(FExecutionContext.None, update.callback_query);
 				} else {
@@ -415,7 +415,7 @@ export class TelegramMessenger extends Messenger {
 
 		const answerData: string = (data as any).data;
 		const chat_id: string = (data as any).message.chat.id.toString();
-		const chat_title: string = (data as any).message.chat.title.toString();
+		// const chat_title: string = (data as any).message.chat.title.toString();
 		const chat_type: string = (data as any).message.chat.type.toString();
 		const message_id: number = (data as any).message.message_id;
 		const message_date_unix: number = (data as any).message.date;
@@ -460,7 +460,9 @@ export class TelegramMessenger extends Messenger {
 
 		const approver: Approver = Object.freeze(
 			new TelegramMessengerInternal.ApproverImpl(
-				username, chat_id, chat_title, chat_type, message_id, new Date(message_date_unix * 1000)
+				username, chat_id,
+				// chat_title,
+				chat_type, message_id, new Date(message_date_unix * 1000)
 			)
 		);
 		if (answerData === TelegramApiClientInternal.ApprovementVote.APPROVE) {
@@ -533,7 +535,7 @@ namespace TelegramMessengerInternal {
 		public constructor(
 			public readonly username: string,
 			public readonly chat_id: string,
-			public readonly chat_title: string,
+			// public readonly chat_title: string,
 			public readonly chat_type: string,
 			public readonly message_id: number,
 			public readonly createdAt: Date
@@ -543,7 +545,7 @@ namespace TelegramMessengerInternal {
 			return this.source === other.source
 				&& this.username === other.username
 				&& this.chat_id === other.chat_id
-				&& this.chat_title === other.chat_title
+				// && this.chat_title === other.chat_title
 				&& this.message_id === other.message_id
 				&& this.createdAt.getTime() === other.createdAt.getTime()
 				;

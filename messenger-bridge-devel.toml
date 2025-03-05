@@ -19,7 +19,7 @@ messenger_indexer = "bot1"
 		#authType = "???TBD???"
 		schema = """
 {
-	"appName", "appVerion"
+	"appName", "appVersion"
 }
 """
 
@@ -37,6 +37,6 @@ messenger_indexer = "bot1"
 		renderTemplate = """
 <b>Do you allow deploy to production?</b>
 <i>Application: </i><b>{{appName}}</b>
-<i>Version: </i><b>{{appVerion}}</b>
-Pls, Igonre this test message (detecting memory leaks)
+<i>Version: </i><b>{{appVersion}}</b>
+Pls, Ignore this test message (detecting memory leaks)
 """
