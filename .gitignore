@@ -19,6 +19,7 @@ lib/**/*.map
 test/**/*.d.ts
 test/**/*.js
 test/**/*.map
+*.tsbuildinfo
 
 # Dev files
 temp/

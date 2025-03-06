@@ -1,19 +1,43 @@
 {
-	"//": "This is used in our build process. Also this file is requred by VSCode",
+	"//": "This is used in our build process. Also this file is required by VSCode",
+	"extends": [
+		"@tsconfig/node22/tsconfig.json",
+		"@tsconfig/strictest/tsconfig.json",
+	],
+	"exclude": [
+		"./bin/app-devel.d.ts",
+		"./bin/app-snapshot.d.ts",
+		"./bin/app.d.ts",
+		"./lib/**/*.d.ts",
+		"./src/**/*.d.ts",
+		"./src-non-release/**/*.d.ts",
+		"./test/**/*.d.ts"
+	],
+	"include": [
+		"./bin/app-devel.ts",
+		"./bin/app-snapshot.ts",
+		"./bin/app.ts",
+		"./lib/**/*.ts",
+		"./src/**/*.ts",
+		"./src-non-release/**/*.ts",
+		"./test/**/*.ts"
+	],
 	"compilerOptions": {
-		"alwaysStrict": true,
+		"composite": true,
 		"declaration": true,
 		"experimentalDecorators": true,
-		"module": "commonjs",
+		"esModuleInterop": true,
+		"forceConsistentCasingInFileNames": true,
+		"incremental": true,
+		"module": "ESNext",
 		"moduleResolution": "node",
-		"noImplicitAny": true,
-		"noImplicitThis": true,
-		"target": "es2022",
+		"removeComments": true,
 		"sourceMap": true,
+		"skipLibCheck": true,
 		"strict": true,
-		"strictNullChecks": true,
 		"strictPropertyInitialization": true,
-		"strictFunctionTypes": true,
-		"strictBindCallApply": true,
+		"noUnusedLocals": false,
+		"noUnusedParameters": false,
+		"target": "es2022",
 	}
 }

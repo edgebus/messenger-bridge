@@ -47,7 +47,6 @@
     curl \
       --verbose \
       --request GET \
-      --data '{"appName":"myApp","appVersion":"0.1.0-rc00"}' \
       http://127.0.0.1:8080/v1/approvement/DeployProduction/72f85dcc-702f-416e-9095-773cb2c6caef
 
     *   Trying 127.0.0.1:8080...
@@ -83,7 +82,6 @@
     curl \
       --verbose \
       --request GET \
-      --data '{"appName":"myApp","appVersion":"0.1.0-rc00"}' \
       http://127.0.0.1:8080/v1/approvement/DeployProduction/72f85dcc-702f-416e-9095-773cb2c6caef
 
     *   Trying 127.0.0.1:8080...

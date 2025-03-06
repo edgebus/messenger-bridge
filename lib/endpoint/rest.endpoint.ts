@@ -1,57 +1,56 @@
-import { FCancellationToken, FEnsure, FExecutionContext, FExecutionContextCancellation, FExecutionContextLogger, FLogger } from "@freemework/common";
-import { FAbstractWebServer, FHostingConfiguration, FWebServer } from "@freemework/hosting";
+import {
+	FEnsure,
+	FLoggerLabelsExecutionContext,
+} from "@freemework/common";
+import {
+	FWebServer,
+} from "@freemework/hosting";
 
-import * as express from "express";
-import * as bodyParser from "body-parser";
+import express from "express";
+import bodyParser from "body-parser";
 
-// Endpoint
-import { BaseEndpoint } from "./BaseEndpoint";
-import { Service } from "../Service";
-import { Bind } from "../misc/Bind";
-import { Approvement } from "../model/Approvement";
+import { BaseEndpoint } from "./_base.endpoint.js";
+import { Approvement } from "../model/approvement.js";
+import { Settings } from "../settings.js";
+import { Service } from "../service/approvement.service.js";
+import { Bind } from "../utils/bind.js";
 
 const ensure: FEnsure = FEnsure.create();
-
-const { name: packageName, version: packageVersion } = require("../../package.json");
 
 export class RestEndpoint extends BaseEndpoint {
 	private readonly _service: Service;
 
 	public constructor(
 		servers: ReadonlyArray<FWebServer>,
-		opts: FHostingConfiguration.BindEndpoint,
+		opts: Settings.Endpoint.Rest,
 		service: Service
 	) {
-		super(servers, opts);
+		super(servers, opts.name, opts);
 
 		this._service = service;
 
 		this._router.get("/approvement", super.safeBinder(this._getTopics));
 		this._router.get("/approvement/:topic/:approvementId", super.safeBinder(this._getApprovement));
 		this._router.post("/approvement/:topic", bodyParser.json(), super.safeBinder(this._createApprovement));
-		this._router.get("/", (__, res) => res.send(JSON.stringify({ packageName, packageVersion }, null, "\t")));
 	}
 
 	@Bind
-	private async _getTopics(req: express.Request, res: express.Response): Promise<void> {
+	private async _getTopics(_req: express.Request, res: express.Response): Promise<void> {
 		const topis = [...this._service.approvementTopics.values()];
 		res.writeHead(200).end(JSON.stringify(topis, null, "\t"));
 	}
 
 	@Bind
 	private async _createApprovement(req: express.Request, res: express.Response): Promise<void> {
-		const cancellationToken: FCancellationToken = FAbstractWebServer.createFCancellationToken(req);
-
 		const method: string = req.method.toUpperCase();
 
-		let executionContext = FExecutionContext.None;
-		executionContext = new FExecutionContextCancellation(executionContext, cancellationToken, true);
-		executionContext = new FExecutionContextLogger(executionContext, this.constructor.name, {
+		let executionContext = req.executionContext;
+		executionContext = new FLoggerLabelsExecutionContext(executionContext, {
 			"httpMethod": method,
 			"httpPath": req.originalUrl
 		});
 
-		const topicName: string = ensure.string(req.params.topic);
+		const topicName: string = ensure.string(req.params['topic']!);
 		const renderData: any = req.body;
 
 		const approvement: Approvement = await this._service.createApprovement(executionContext, topicName, renderData);
@@ -63,19 +62,16 @@ export class RestEndpoint extends BaseEndpoint {
 
 	@Bind
 	private async _getApprovement(req: express.Request, res: express.Response): Promise<void> {
-		const cancellationToken: FCancellationToken = FAbstractWebServer.createFCancellationToken(req);
-
 		const method: string = req.method.toUpperCase();
 
-		let executionContext = FExecutionContext.None;
-		executionContext = new FExecutionContextCancellation(executionContext, cancellationToken, true);
-		executionContext = new FExecutionContextLogger(executionContext, this.constructor.name, {
+		let executionContext = req.executionContext;
+		executionContext = new FLoggerLabelsExecutionContext(executionContext, {
 			"httpMethod": method,
 			"httpPath": req.originalUrl
 		});
 
-		const topicName: string = ensure.string(req.params.topic);
-		const approvementId: string = ensure.string(req.params.approvementId);
+		const topicName: string = ensure.string(req.params['topic']!);
+		const approvementId: string = ensure.string(req.params['approvementId']!);
 
 		try {
 			const approvement: Service.ApprovementWithStatus = await this._service

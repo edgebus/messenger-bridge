@@ -31,7 +31,7 @@
 			],
 			"type": "node",
 			"sourceMaps": true,
-			"remoteRoot": "/usr/local/zxteamorg/messenger-bridge"
+			"remoteRoot": "/usr/local/edgebus/messenger-bridge"
 		},
 	]
 }

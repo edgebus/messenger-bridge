@@ -30,4 +30,4 @@ if [ -n "${DO_INIT_SLEEP}" ]; then
 fi
 
 
-exec node ${NODEJS_ARGS} /usr/local/zxteamorg/messenger-bridge/bin/app.js $*
+exec node ${NODEJS_ARGS} /usr/local/edgebus/messenger-bridge/bin/app.js $*

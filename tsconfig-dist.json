@@ -1,13 +1,24 @@
 {
 	"extends": "./tsconfig.json",
+	"exclude": [
+		"./bin/app-devel.d.ts",
+        "./bin/app-snapshot.d.ts",
+        "./bin/app.d.ts",
+		"./lib/**/*.d.ts",
+        "./src/**/*.d.ts",
+	],
 	"include": [
-		"lib/**/*"
+        "./bin/app-devel.ts",
+        "./bin/app-snapshot.ts",
+        "./bin/app.ts",
+		"./lib/**/*.ts",
+        "./src/**/*",
 	],
 	"compilerOptions": {
 		"listFiles": true,
-		"outDir": ".dist/lib/",
+		"outDir": ".dist",
 		"inlineSources": false,
 		"sourceMap": true,
-		"sourceRoot": "lib"
+		"sourceRoot": "."
 	}
 }

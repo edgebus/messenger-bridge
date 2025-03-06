@@ -1,8 +1,8 @@
-ARG BUILD_IMAGE=node:16-alpine
-ARG TEST_IMAGE=zxteamorg/messenger-bridge/local
+ARG BUILD_IMAGE=node:22-alpine
+ARG TEST_IMAGE=edgebus.example.org/messenger-bridge/local
 
 FROM ${TEST_IMAGE} AS test_image
-WORKDIR /usr/local/zxteamorg/messenger-bridge
+WORKDIR /usr/local/edgebus/messenger-bridge
 COPY package*.json ./
 RUN npm install --no-progress
 COPY test ./test
@@ -19,6 +19,6 @@ RUN echo -e '{\n\
 	}\n\
 }' > tsconfig-test.json
 RUN npx tsc --project tsconfig-test.json
-COPY docker/docker-entrypoint-tests.sh /usr/local/bin/
+COPY docker/docker-entrypoint-tests.sh /usr/local/bin/docker-entrypoint-edgebus-messenger-bridge-tests.sh
 VOLUME [ "/test-results" ]
-ENTRYPOINT [ "/usr/local/bin/docker-entrypoint-tests.sh" ]
+ENTRYPOINT [ "/usr/local/bin/docker-entrypoint-edgebus-messenger-bridge-tests.sh" ]

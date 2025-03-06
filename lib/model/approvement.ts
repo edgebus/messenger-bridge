@@ -1,6 +1,6 @@
-import { ApprovementTopic } from "./ApprovementTopic";
-import { Approver } from "./Approver";
-import { ApprovementId } from "./Primitives";
+import { ApprovementTopic } from "./approvement_topic.js";
+import { Approver } from "./approver.js";
+import { ApprovementId } from "./primitives.js";
 
 export interface Approvement {
 	readonly approvementId: ApprovementId;
