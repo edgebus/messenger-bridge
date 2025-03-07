@@ -1,14 +1,29 @@
-import { FCancellationToken, FLogger, FCancellationTokenSourceManual, FEnsure, FEnsureException, FExceptionInvalidOperation, Fusing, FExceptionArgument, FExecutionContext, FExceptionCancelled, FException, FDisposableBase, FWebClient, FHttpClient, FExecutionContextCancellation, FExecutionContextLogger } from "@freemework/common";
+import {
+	FLogger,
+	FCancellationTokenSourceManual,
+	FEnsure,
+	FEnsureException,
+	FExceptionInvalidOperation,
+	FUsing,
+	FExceptionArgument,
+	FExecutionContext,
+	FException,
+	FDisposableBase,
+	FWebClient,
+	FHttpClient,
+	FCancellationException,
+	FCancellationExecutionContext,
+} from "@freemework/common";
 
 import * as _ from "lodash";
 
-import { Configuration } from "../Configuration";
-import { Bind } from "../misc/Bind";
-import { Messenger } from "./Messenger";
-import { ApprovementId, ApprovementTopicName } from "../model/Primitives";
-import { KeyValueDb } from "../misc/KeyValueDb";
-import { ApprovementTopic } from "../model/ApprovementTopic";
-import { Approver } from "../model/Approver";
+import { Settings } from "../settings.js";
+import { Bind } from "../utils/bind.js";
+import { BaseMessenger } from "./_base.messenger.js";
+import { ApprovementId, ApprovementTopicName } from "../model/primitives.js";
+import { KeyValueDb } from "../misc/key_value_db.js";
+import { ApprovementTopic } from "../model/approvement_topic.js";
+import { Approver } from "../model/approver.js";
 
 const approvementMessageTokenEnsure: FEnsure = FEnsure.create((message, data) => {
 	throw new TelegramMessenger.ApprovementMessageTokenError(message, data);
@@ -17,13 +32,14 @@ const protocolEnsure: FEnsure = FEnsure.create((message, data) => {
 	throw new TelegramMessenger.TelegramProtocolError(message, data);
 });
 
-export class TelegramMessenger extends Messenger {
+export class TelegramMessenger extends BaseMessenger {
+	private readonly _logger: FLogger;
 	private readonly _workerSleepMs: TelegramMessenger.Opts["workerSleepMs"];
 	private readonly _telegram: TelegramApiClient;
 	private readonly _disposeCancellationTokenSource: FCancellationTokenSourceManual;
 	private readonly _chatTopics: Map<
 		TelegramApiClientInternal.ChatId,
-		Configuration.Messenger.Common.ApprovementTopicBinding["bindTopic"]
+		Settings.Messenger.Common.ApprovementTopicBinding["bindTopic"]
 	>;
 	private _workerTimeout: NodeJS.Timeout | null;
 	private _safeWorkerTask: Promise<void> | null;
@@ -43,6 +59,7 @@ export class TelegramMessenger extends Messenger {
 
 		super(configuration, kvDb);
 
+		this._logger = FLogger.create(this.constructor.name);
 		this._disposeCancellationTokenSource = new FCancellationTokenSourceManual();
 		this._workerSleepMs = opts.workerSleepMs;
 		this._workerTimeout = null;
@@ -56,14 +73,14 @@ export class TelegramMessenger extends Messenger {
 		}
 	}
 
-	public get name(): string { return this._configuration.name; }
+	public override get name(): string { return this._configuration.name; }
 
 	public async closeApprovementAsApprove(
 		executionContext: FExecutionContext,
 		approvementId: ApprovementId,
 		approvers: ReadonlyArray<Approver>
 	): Promise<void> {
-		const approvementMessageToken: Messenger.ApprovementMessageToken = await this._kvDb.get(
+		const approvementMessageToken: BaseMessenger.ApprovementMessageToken = await this._kvDb.get(
 			executionContext,
 			this.formatKey__approvementMessageToken_by_approvementId(approvementId)
 		);
@@ -115,7 +132,7 @@ export class TelegramMessenger extends Messenger {
 		executionContext: FExecutionContext,
 		approvementId: ApprovementId
 	): Promise<void> {
-		const approvementMessageToken: Messenger.ApprovementMessageToken = await this._kvDb.get(
+		const approvementMessageToken: BaseMessenger.ApprovementMessageToken = await this._kvDb.get(
 			executionContext,
 			this.formatKey__approvementMessageToken_by_approvementId(approvementId)
 		);
@@ -158,7 +175,7 @@ export class TelegramMessenger extends Messenger {
 		approvementId: ApprovementId,
 		refuser: Approver
 	): Promise<void> {
-		const approvementMessageToken: Messenger.ApprovementMessageToken = await this._kvDb.get(
+		const approvementMessageToken: BaseMessenger.ApprovementMessageToken = await this._kvDb.get(
 			executionContext,
 			this.formatKey__approvementMessageToken_by_approvementId(approvementId)
 		);
@@ -207,10 +224,10 @@ export class TelegramMessenger extends Messenger {
 		approvementTopicName: ApprovementTopicName,
 		approvementId: ApprovementId,
 		renderData: any
-	): Promise<Messenger.ApprovementMessageToken> {
+	): Promise<BaseMessenger.ApprovementMessageToken> {
 		this.verifyInitializedAndNotDisposed();
 
-		const approvementTopicBinding: Configuration.Messenger.Telegram.ApprovementTopicBinding | undefined
+		const approvementTopicBinding: Settings.Messenger.Telegram.ApprovementTopicBinding | undefined
 			= this.configuration.approvementTopicBindings.get(approvementTopicName);
 
 		const approvementTopic: ApprovementTopic | undefined
@@ -222,9 +239,9 @@ export class TelegramMessenger extends Messenger {
 			);
 		}
 
-		const messageContent: string = Messenger.renderMessageContent(approvementTopicBinding.renderTemplate, renderData);
+		const messageContent: string = BaseMessenger.renderMessageContent(approvementTopicBinding.renderTemplate, renderData);
 
-		await Fusing(executionContext, () => this._kvDb.transaction(executionContext), async (__, db) => {
+		await FUsing(executionContext, () => this._kvDb.transaction(executionContext), async (__, db) => {
 			const key: KeyValueDb.Key = this.formatKey__messageContent_by_approvementId(approvementId);
 			const duplicateMessageContent: KeyValueDb.Value | null = await db.find(executionContext, key);
 			if (duplicateMessageContent !== null) {
@@ -245,12 +262,12 @@ export class TelegramMessenger extends Messenger {
 			}
 		});
 
-		const approvementMessageToken: Messenger.ApprovementMessageToken = JSON.stringify({
+		const approvementMessageToken: BaseMessenger.ApprovementMessageToken = JSON.stringify({
 			chat_id: approvementTopicBinding.chatId,
 			message_id: message.message_id
 		});
 
-		await Fusing(executionContext, () => this._kvDb.transaction(executionContext), async (__, db) => {
+		await FUsing(executionContext, () => this._kvDb.transaction(executionContext), async (__, db) => {
 			await db.set(
 				executionContext,
 				this.formatKey__approvementMessageToken_by_approvementId(approvementId),
@@ -273,7 +290,7 @@ export class TelegramMessenger extends Messenger {
 		approvers: ReadonlyArray<Approver>
 	): Promise<void> {
 
-		const approvementMessageToken: Messenger.ApprovementMessageToken = await this._kvDb.get(
+		const approvementMessageToken: BaseMessenger.ApprovementMessageToken = await this._kvDb.get(
 			executionContext,
 			this.formatKey__approvementMessageToken_by_approvementId(approvementId)
 		);
@@ -308,17 +325,19 @@ export class TelegramMessenger extends Messenger {
 	}
 
 	protected async onInit(): Promise<void> {
-		const logger: FLogger = FExecutionContextLogger.of(this.initExecutionContext).logger;
+		const logger: FLogger = this._logger;
+		const executionContext: FExecutionContext = this.initExecutionContext;
 
-		logger.debug("Initializing...");
+		logger.debug(executionContext, () => "Initializing...");
 		this._workerTimeout = setTimeout(this._backgroundWorker, this._workerSleepMs);
-		logger.debug("Initialized.");
+		logger.debug(executionContext, () => "Initialized.");
 	}
 
 	protected async onDispose(): Promise<void> {
-		const logger: FLogger = FExecutionContextLogger.of(this.initExecutionContext).logger;
+		const logger: FLogger = this._logger;
+		const executionContext: FExecutionContext = this.initExecutionContext;
 
-		logger.debug("Disposing...");
+		logger.debug(executionContext, () => "Disposing...");
 
 		if (this._workerTimeout !== null) {
 			clearTimeout(this._workerTimeout);
@@ -331,7 +350,7 @@ export class TelegramMessenger extends Messenger {
 			await this._safeWorkerTask;
 		}
 
-		logger.debug("Disposed");
+		logger.debug(executionContext, () => "Disposed");
 	}
 
 	private get configuration(): TelegramMessenger.Configuration {
@@ -342,23 +361,24 @@ export class TelegramMessenger extends Messenger {
 	private _backgroundWorker(): void {
 		if (this.disposing || this.disposed) { return; }
 
-		const logger: FLogger = FExecutionContextLogger.of(this.initExecutionContext).logger;
+		const logger: FLogger = this._logger;
+		const executionContext: FExecutionContext = this.initExecutionContext;
 
 		if (this._safeWorkerTask) {
-			logger.error("[BUG] Illegal operation at current state. Previous worker is not completed yet.");
+			logger.error(executionContext, () => "[BUG] Illegal operation at current state. Previous worker is not completed yet.");
 			return;
 		}
 
 		this._safeWorkerTask = this._backgroundWorkerJob()
 			.catch(reason => {
-				if (reason instanceof FExceptionCancelled) {
-					logger.debug("Worker job was cancelled.");
+				if (reason instanceof FCancellationException) {
+					logger.debug(executionContext, () => "Worker job was cancelled.");
 					return;
 				}
 
 				const err = FException.wrapIfNeeded(reason);
-				if (logger.isInfoEnabled) { logger.info(`Worker job failure. Error: ${err.message}`); }
-				logger.trace(`Worker job failure.`, err);
+				logger.info(executionContext, () => `Worker job failure. Error: ${err.message}`);
+				logger.trace(executionContext, () => `Worker job failure.`, err);
 			})
 			.finally(() => {
 				this._safeWorkerTask = null;
@@ -376,12 +396,12 @@ export class TelegramMessenger extends Messenger {
 			};
 
 
-		const executionContext: FExecutionContext = new FExecutionContextCancellation(
-			FExecutionContext.None,
+		const executionContext: FExecutionContext = new FCancellationExecutionContext(
+			FExecutionContext.Default,
 			this._disposeCancellationTokenSource.token
 		);
 
-		const logger: FLogger = FExecutionContextLogger.of(executionContext).logger;
+		const logger: FLogger = this._logger;
 
 		const updatesData = await this._telegram.getUpdates(
 			executionContext,
@@ -391,14 +411,15 @@ export class TelegramMessenger extends Messenger {
 		for (const update of updatesData) {
 			try {
 				if (update.message !== undefined) {
-					console.log(update.message);
+					logger.info(executionContext, () => `Got a message: ${JSON.stringify(update.message)}`);
 				} else if (update.callback_query !== undefined) {
-					await this._onUpdateCallbackQuery(FExecutionContext.None, update.callback_query);
+					await this._onUpdateCallbackQuery(executionContext, update.callback_query);
 				} else {
-					logger.debug(`Skip unsupported update: ${JSON.stringify(update)}`);
+					logger.debug(executionContext, () => `Skip unsupported update: ${JSON.stringify(update)}`);
 				}
 			} catch (e) {
-				logger.warn(e as any);
+				const ex: FException = FException.wrapIfNeeded(e);
+				logger.warn(executionContext, ex.message);
 			}
 
 			this._latestProcessedUpdateId = this._latestProcessedUpdateId !== null
@@ -406,43 +427,39 @@ export class TelegramMessenger extends Messenger {
 				: this._latestProcessedUpdateId = update.update_id;
 		}
 
-		if (logger.isInfoEnabled) {
-			logger.info(`${updatesData.length} updates processed`);
-		}
+		logger.info(executionContext, () => `${updatesData.length} updates processed`);
 	}
 
 	private async _onUpdateCallbackQuery(executionContext: FExecutionContext, data: TelegramApiClientInternal.CallbackQuery): Promise<void> {
 
 		const answerData: string = (data as any).data;
 		const chat_id: string = (data as any).message.chat.id.toString();
-		const chat_title: string = (data as any).message.chat.title.toString();
+		// const chat_title: string = (data as any).message.chat.title.toString();
 		const chat_type: string = (data as any).message.chat.type.toString();
 		const message_id: number = (data as any).message.message_id;
 		const message_date_unix: number = (data as any).message.date;
 		const username: string = (data as any).from.username;
 
-		const logger: FLogger = FExecutionContextLogger.of(executionContext).logger;
+		const logger: FLogger = this._logger;
 
 		const topicName = this._chatTopics.get(chat_id);
 		if (topicName === undefined) {
-			if (logger.isDebugEnabled) {
-				logger.debug(
-					`Skip CallbackQuery update due related topic was not found by chat_id: ${chat_id}`
-				);
-			}
+			logger.debug(
+				executionContext,
+				() => `Skip CallbackQuery update due related topic was not found by chat_id: ${chat_id}`
+			);
 			return;
 		}
 		const bindingConfiguration = this._configuration.approvementTopicBindings.get(topicName);
 		if (bindingConfiguration === undefined) {
-			if (logger.isDebugEnabled) {
-				logger.debug(
-					`Skip CallbackQuery update due related bindingConfiguration was not found by topicName: ${topicName}`
-				);
-			}
+			logger.debug(
+				executionContext,
+				() => `Skip CallbackQuery update due related bindingConfiguration was not found by topicName: ${topicName}`
+			);
 			return;
 		}
 
-		const approvementMessageToken: Messenger.ApprovementMessageToken = JSON.stringify({
+		const approvementMessageToken: BaseMessenger.ApprovementMessageToken = JSON.stringify({
 			chat_id: chat_id,
 			message_id: message_id
 		});
@@ -450,17 +467,18 @@ export class TelegramMessenger extends Messenger {
 		const approvementId: ApprovementId | null = await this._kvDb
 			.find(executionContext, this.formatKey__approvementId_by_approvementMessageToken(approvementMessageToken));
 		if (approvementId === null) {
-			if (logger.isDebugEnabled) {
-				logger.debug(
-					`Skip CallbackQuery update due related approvementId was not found by chat_id: ${chat_id} and message_id: ${message_id}`
-				);
-			}
+			logger.debug(
+				executionContext,
+				() => `Skip CallbackQuery update due related approvementId was not found by chat_id: ${chat_id} and message_id: ${message_id}`
+			);
 			return;
 		}
 
 		const approver: Approver = Object.freeze(
 			new TelegramMessengerInternal.ApproverImpl(
-				username, chat_id, chat_title, chat_type, message_id, new Date(message_date_unix * 1000)
+				username, chat_id,
+				// chat_title,
+				chat_type, message_id, new Date(message_date_unix * 1000)
 			)
 		);
 		if (answerData === TelegramApiClientInternal.ApprovementVote.APPROVE) {
@@ -507,7 +525,7 @@ export class TelegramMessenger extends Messenger {
 		return `${this.name}:approvementMessageToken_by_approvementId(${approvementId})`;
 	}
 
-	private formatKey__approvementId_by_approvementMessageToken(approvementMessageToken: Messenger.ApprovementMessageToken) {
+	private formatKey__approvementId_by_approvementMessageToken(approvementMessageToken: BaseMessenger.ApprovementMessageToken) {
 		return `${this.name}:approvementId_by_approvementMessageToken(${approvementMessageToken})`;
 	}
 }
@@ -518,7 +536,7 @@ export namespace TelegramMessenger {
 	}
 
 	// tslint:disable-next-line: no-shadowed-variable
-	export interface Configuration extends Configuration.Messenger.Telegram {
+	export interface Configuration extends Settings.Messenger.Telegram {
 		readonly approvementTopics: Map<ApprovementTopicName, ApprovementTopic>;
 	}
 
@@ -533,7 +551,7 @@ namespace TelegramMessengerInternal {
 		public constructor(
 			public readonly username: string,
 			public readonly chat_id: string,
-			public readonly chat_title: string,
+			// public readonly chat_title: string,
 			public readonly chat_type: string,
 			public readonly message_id: number,
 			public readonly createdAt: Date
@@ -543,7 +561,7 @@ namespace TelegramMessengerInternal {
 			return this.source === other.source
 				&& this.username === other.username
 				&& this.chat_id === other.chat_id
-				&& this.chat_title === other.chat_title
+				// && this.chat_title === other.chat_title
 				&& this.message_id === other.message_id
 				&& this.createdAt.getTime() === other.createdAt.getTime()
 				;
@@ -686,7 +704,7 @@ class TelegramApiClient extends FDisposableBase {
 
 		if (data !== undefined) {
 			if (data.offset !== undefined) {
-				queryArgs.offset = data.offset.toString();
+				queryArgs["offset"] = data.offset.toString();
 			}
 		}
 
@@ -780,7 +798,7 @@ export namespace TelegramApiClient {
 
 namespace TelegramApiClientInternal {
 	export class TelegramWebClient extends FWebClient {
-		public postJson(executionContext: FExecutionContext, urlPath: string, data: any): Promise<FWebClient.Response> {
+		public override postJson(executionContext: FExecutionContext, urlPath: string, data: any): Promise<FWebClient.Response> {
 			return super.invoke(executionContext, urlPath, "POST", {
 				headers: {
 					"Content-Type": "application/json"

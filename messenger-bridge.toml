@@ -1,36 +1,43 @@
 # File format: https://github.com/toml-lang/toml
 
+[io.edgebus.messenger-bridge.runtime]
 
-# Select Web servers to be used (splitted by space)
-server_indexer = "apiSrv"
+	[[io.edgebus.messenger-bridge.runtime.server]]
+		# Declare an API HTTP server
+		index = "apiSrv"
+		type = "http"
+		listenHost = "0.0.0.0"
+		listenPort = 8080
 
-# Select endpoints to be used (splitted by space)
-endpoint_indexer = "rest welcome"
+	[[io.edgebus.messenger-bridge.runtime.endpoint]]
+		index = "infoEndpoint"
+		type = "info"
+		servers = "apiSrv"
+		bindPath = "/info"
 
-[[server]]
-	# Declare an API HTTP server
-	index = "apiSrv"
-	type = "http"
-	listenHost = "0.0.0.0"
-	listenPort = 8080
+	[[io.edgebus.messenger-bridge.runtime.endpoint]]
+		index = "monitoringEndpoint"
+		type = "monitoring"
+		servers = "apiSrv"
+		bindPath = "/metrics"
 
-[[endpoint]]
-	# Declare REST endpoint and bound to the API HTTP server on path /v1
-	index = "rest"
-	type = "rest"
-	servers = "apiSrv"
-	bindPath = "/v1"
+	[[io.edgebus.messenger-bridge.runtime.endpoint]]
+		# Declare REST endpoint and bound to the API HTTP server on path /v1
+		index = "restEndpoint"
+		type = "rest"
+		servers = "apiSrv"
+		bindPath = "/v1"
 
-[[endpoint]]
-	# Declare Welcome Page endpoint and bound to the API HTTP server on path /
-	index = "welcome"
-	type = "welcome-page"
-	servers = "apiSrv"
-	bindPath = "/" 
+	[[io.edgebus.messenger-bridge.runtime.endpoint]]
+		# Declare Welcome Page endpoint and bound to the API HTTP server on path /
+		index = "welcomeEndpoint"
+		type = "welcome-page"
+		servers = "apiSrv"
+		bindPath = "/" 
 
-[[endpoint]]
-	# Declare WebSocket endpoint and bound to the API HTTP server on path /ws1
-	index = "ws"
-	type = "websocket"
-	servers = "apiSrv"
-	bindPath = "/ws1"
+	[[io.edgebus.messenger-bridge.runtime.endpoint]]
+		# Declare WebSocket endpoint and bound to the API HTTP server on path /ws1
+		index = "wsEndpoint"
+		type = "websocket"
+		servers = "apiSrv"
+		bindPath = "/ws1"

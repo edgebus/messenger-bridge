@@ -1,23 +1,37 @@
-import { FCancellationToken, FEventChannel, FEventChannelMixin, FExceptionInvalidOperation, FExecutionContext, FInitableBase, FLogger } from "@freemework/common";
+import {
+	FChannelEvent,
+	FChannelEventMixin,
+	FExceptionInvalidOperation,
+	FExecutionContext,
+	FInitableBase,
+} from "@freemework/common";
 
-import { Configuration } from "../Configuration";
+//
+// import { render } from "mustache";
+// ^^^^^^
+// SyntaxError: The requested module 'mustache' does not provide an export named 'render'
+//import { render } from "mustache";
+//
+// Workaround
+import mustache from "mustache";
+const { render } = mustache;
 
-import { render } from "mustache";
-import { ApprovementId, ApprovementTopicName } from "../model/Primitives";
-import { Approvement } from "../model/Approvement";
-import { KeyValueDb } from "../misc/KeyValueDb";
-import { ApprovementTopic } from "../model/ApprovementTopic";
-import { Approver } from "../model/Approver";
+import { Settings } from "../settings.js";
 
-export abstract class Messenger extends FInitableBase {
+import { ApprovementId, ApprovementTopicName } from "../model/primitives.js";
+import { KeyValueDb } from "../misc/key_value_db.js";
+import { ApprovementTopic } from "../model/approvement_topic.js";
+import { Approver } from "../model/approver.js";
+
+export abstract class BaseMessenger extends FInitableBase {
 	protected readonly _approveEventChannel: ApprovementEventChannelSink;
 	protected readonly _refuseEventChannel: ApprovementEventChannelSink;
-	protected readonly _configuration: Messenger.Configuration;
+	protected readonly _configuration: BaseMessenger.Configuration;
 	protected readonly _kvDb: KeyValueDb;
 
-	public get approveEventChannel(): Messenger.ApprovementEventChannel { return this._approveEventChannel; }
+	public get approveEventChannel(): BaseMessenger.ApprovementEventChannel { return this._approveEventChannel; }
 	public get name(): string { return this.name; }
-	public get refuseEventChannel(): Messenger.ApprovementEventChannel { return this._refuseEventChannel; }
+	public get refuseEventChannel(): BaseMessenger.ApprovementEventChannel { return this._refuseEventChannel; }
 
 	public isBoundToApprovementTopic(approvementTopicName: ApprovementTopicName): boolean {
 		return this._configuration.approvementTopicBindings.has(approvementTopicName);
@@ -45,7 +59,7 @@ export abstract class Messenger extends FInitableBase {
 		approvementTopicName: ApprovementTopicName,
 		approvementId: ApprovementId,
 		renderData: any
-	): Promise<Messenger.ApprovementMessageToken>;
+	): Promise<BaseMessenger.ApprovementMessageToken>;
 
 	public abstract updateApprovement(
 		executionContext: FExecutionContext,
@@ -53,7 +67,7 @@ export abstract class Messenger extends FInitableBase {
 		approvers: ReadonlyArray<Approver>
 	): Promise<void>;
 
-	protected constructor(configuration: Messenger.Configuration, kvDb: KeyValueDb) {
+	protected constructor(configuration: BaseMessenger.Configuration, kvDb: KeyValueDb) {
 		super();
 		this._configuration = configuration;
 		this._kvDb = kvDb;
@@ -74,38 +88,39 @@ export abstract class Messenger extends FInitableBase {
 		});
 
 		const messageContent: string = render(mustacheRenderTemplate, mustacheDataContext);
+		// const messageContent: string = "tbd";
 		return messageContent;
 	}
 
 }
 
-export namespace Messenger {
+export namespace BaseMessenger {
 	export type ApprovementMessageToken = string;
 
 	// tslint:disable-next-line: no-shadowed-variable
-	export interface Configuration extends Configuration.Messenger.Common {
+	export interface Configuration extends Settings.Messenger.Common {
 		readonly approvementTopics: Map<ApprovementTopicName, ApprovementTopic>;
 	}
 
 
-	export interface ApprovementEvent extends FEventChannel.Event<Approver> {
-		readonly sender: Messenger;
+	export interface ApprovementEvent extends FChannelEvent.Event<Approver> {
+		readonly sender: BaseMessenger;
 		readonly approvementId: ApprovementId;
 	}
-	export type ApprovementEventChannel = FEventChannel<Approver, ApprovementEvent>;
+	export type ApprovementEventChannel = FChannelEvent<Approver, ApprovementEvent>;
 
 }
 
-class ApprovementEventChannelSink implements Messenger.ApprovementEventChannel {
+class ApprovementEventChannelSink implements BaseMessenger.ApprovementEventChannel {
 	public async emit(
 		executionContext: FExecutionContext,
-		sender: Messenger,
+		sender: BaseMessenger,
 		approvementId: ApprovementId,
 		data: Approver
 	): Promise<void> {
 		await this.notify(executionContext, Object.freeze({ sender, approvementId, data }));
 	}
 }
-interface ApprovementEventChannelSink extends FEventChannelMixin<Approver, Messenger.ApprovementEvent> { }
-FEventChannelMixin.applyMixin(ApprovementEventChannelSink);
+interface ApprovementEventChannelSink extends FChannelEventMixin<Approver, BaseMessenger.ApprovementEvent> { }
+FChannelEventMixin.applyMixin(ApprovementEventChannelSink);
 

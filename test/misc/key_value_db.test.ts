@@ -1,0 +1,137 @@
+import { FExecutionContext, FUsing as Fusing } from "@freemework/common";
+import { assert } from "chai";
+
+import { InMemory, KeyValueDb } from "../../lib/misc/key_value_db.js";
+
+for (const { dbFactory, name } of [
+	{ name: InMemory.name, dbFactory: () => new InMemory() }
+]) {
+	describe(`KeyValueDb implementation '${name}' tests`, function () {
+		it(`Platform test ${process.platform} (${process.arch})`, function () {
+			assert.equal(42, 42);
+		});
+
+		it("find() should return null for non-existent key", async function () {
+			const db: KeyValueDb = dbFactory();
+			const value: KeyValueDb.Value | null = await db.find(FExecutionContext.Default, "testKey");
+			assert.isNull(value);
+		});
+		it("get() should throw NoSuchKeyError for non-existent key", async function () {
+			const db: KeyValueDb = dbFactory();
+			let expectedErr: any;
+			try {
+				await db.get(FExecutionContext.Default, "testKey");
+			} catch (e) {
+				expectedErr = e;
+			}
+			assert.isDefined(expectedErr);
+			assert.instanceOf(expectedErr, KeyValueDb.NoSuchKeyError);
+		});
+		it("set() should return null as previous value for non-existent key", async function () {
+			const db: KeyValueDb = dbFactory();
+			const value: KeyValueDb.Value | null = await db.set(FExecutionContext.Default, "testKey", "testValue");
+			assert.isNull(value);
+		});
+
+		describe("Get/Set tests", function () {
+			it("find() should return value for existent key", async function () {
+				const db: KeyValueDb = dbFactory();
+				await db.set(FExecutionContext.Default, "testKey", "testValue");
+				const value: KeyValueDb.Value | null = await db.find(FExecutionContext.Default, "testKey");
+				assert.equal(value, "testValue");
+			});
+		});
+
+		describe("Transactional tests", function () {
+			it("find() should return value for existent key", async function () {
+				const db: KeyValueDb = dbFactory();
+				await Fusing(FExecutionContext.Default, () => db.transaction(FExecutionContext.Default), async (__, dbTransaction) => {
+					const value: KeyValueDb.Value | null = await dbTransaction.find(FExecutionContext.Default, "testKey");
+					assert.isNull(value);
+				});
+			});
+
+			it("get() should throw NoSuchKeyError for non-existent key", async function () {
+				const db: KeyValueDb = dbFactory();
+				await Fusing(FExecutionContext.Default, () => db.transaction(FExecutionContext.Default), async (__, dbTransaction) => {
+					let expectedErr: any;
+					try {
+						await dbTransaction.get(FExecutionContext.Default, "testKey");
+					} catch (e) {
+						expectedErr = e;
+					}
+					assert.isDefined(expectedErr);
+					assert.instanceOf(expectedErr, KeyValueDb.NoSuchKeyError);
+				});
+			});
+
+			it("set() should return null as previous value for non-existent key", async function () {
+				const db: KeyValueDb = dbFactory();
+				await Fusing(FExecutionContext.Default, () => db.transaction(FExecutionContext.Default), async (__, dbTransaction) => {
+					const value: KeyValueDb.Value | null = await dbTransaction.set(FExecutionContext.Default, "testKey", "testValue");
+					assert.isNull(value);
+				});
+			});
+
+			it("dispose() should revert changes #1", async function () {
+				const db: KeyValueDb = dbFactory();
+				await Fusing(FExecutionContext.Default, () => db.transaction(FExecutionContext.Default), async (__, dbTransaction) => {
+					const value: KeyValueDb.Value | null = await dbTransaction.set(FExecutionContext.Default, "testKey", "testValue");
+					assert.isNull(value);
+				});
+				const oldValue = await db.find(FExecutionContext.Default, "testKey");
+				assert.isNull(oldValue);
+			});
+
+			it("dispose() should revert changes #2", async function () {
+				const db: KeyValueDb = dbFactory();
+				await db.set(FExecutionContext.Default, "testKey", "testValue");
+				await Fusing(FExecutionContext.Default, () => db.transaction(FExecutionContext.Default), async (__, dbTransaction) => {
+					const value: KeyValueDb.Value | null = await dbTransaction.set(FExecutionContext.Default, "testKey", "testValueUpdated");
+					assert.equal(value, "testValue");
+				});
+				const oldValue = await db.find(FExecutionContext.Default, "testKey");
+				assert.equal(oldValue, "testValue");
+			});
+
+			it("dispose() should revert changes #3", async function () {
+				const db: KeyValueDb = dbFactory();
+				await Fusing(FExecutionContext.Default, () => db.transaction(FExecutionContext.Default), async (__, dbTransaction) => {
+					const value: KeyValueDb.Value | null = await dbTransaction.set(FExecutionContext.Default, "testKey", "testValue");
+					assert.isNull(value);
+				});
+				let expectedErr: any;
+				try {
+					await db.get(FExecutionContext.Default, "testKey");
+				} catch (e) {
+					expectedErr = e;
+				}
+				assert.isDefined(expectedErr);
+				assert.instanceOf(expectedErr, KeyValueDb.NoSuchKeyError);
+			});
+
+			it("commit() should apply changes #1", async function () {
+				const db: KeyValueDb = dbFactory();
+				await Fusing(FExecutionContext.Default, () => db.transaction(FExecutionContext.Default), async (__, dbTransaction) => {
+					const value: KeyValueDb.Value | null = await dbTransaction.set(FExecutionContext.Default, "testKey", "testValue");
+					assert.isNull(value);
+					await dbTransaction.commit(FExecutionContext.Default);
+				});
+				const oldValue = await db.find(FExecutionContext.Default, "testKey");
+				assert.equal(oldValue, "testValue");
+			});
+
+			it("commit() should apply changes #2", async function () {
+				const db: KeyValueDb = dbFactory();
+				await db.set(FExecutionContext.Default, "testKey", "testValue");
+				await Fusing(FExecutionContext.Default, () => db.transaction(FExecutionContext.Default), async (__, dbTransaction) => {
+					const value: KeyValueDb.Value | null = await dbTransaction.set(FExecutionContext.Default, "testKey", "testValueUpdated");
+					assert.equal(value, "testValue");
+					await dbTransaction.commit(FExecutionContext.Default);
+				});
+				const oldValue = await db.find(FExecutionContext.Default, "testKey");
+				assert.equal(oldValue, "testValueUpdated");
+			});
+		});
+	});
+}

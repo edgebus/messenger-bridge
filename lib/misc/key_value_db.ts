@@ -1,4 +1,4 @@
-import { FDisposable, FExceptionInvalidOperation, FExecutionContext } from "@freemework/common";
+import { FDisposable, FDisposableBase, FExceptionInvalidOperation, FExecutionContext } from "@freemework/common";
 
 
 export interface KeyValueDb extends KeyValueDb.Operation {
@@ -46,7 +46,7 @@ export namespace KeyValueDb {
 	}
 
 	export class KeyValueDbError extends Error {
-		public get name(): string {
+		public override get name(): string {
 			return this.constructor.name;
 		}
 	}
@@ -80,13 +80,13 @@ export class InMemory implements KeyValueDb {
 		this._dict = new Map();
 	}
 
-	public find(executionContext: FExecutionContext, key: string): Promise<string | null> {
+	public find(_executionContext: FExecutionContext, key: string): Promise<string | null> {
 		const value: KeyValueDb.Value | undefined = this._dict.get(key);
 
 		return Promise.resolve(value !== undefined ? value : null);
 	}
 
-	public get(executionContext: FExecutionContext, key: string): Promise<string> {
+	public get(_executionContext: FExecutionContext, key: string): Promise<string> {
 		const value: KeyValueDb.Value | undefined = this._dict.get(key);
 
 		if (value === undefined) {
@@ -96,7 +96,7 @@ export class InMemory implements KeyValueDb {
 		return Promise.resolve(value);
 	}
 
-	public set(executionContext: FExecutionContext, key: string, value: string | null): Promise<string | null> {
+	public set(_executionContext: FExecutionContext, key: string, value: string | null): Promise<string | null> {
 		const oldValue: KeyValueDb.Value | undefined = this._dict.get(key);
 
 		if (value === null) {
@@ -108,25 +108,26 @@ export class InMemory implements KeyValueDb {
 		return Promise.resolve(oldValue !== undefined ? oldValue : null);
 	}
 
-	public transaction(executionContext: FExecutionContext): Promise<KeyValueDb.TransactionalOperation> {
+	public transaction(_executionContext: FExecutionContext): Promise<KeyValueDb.TransactionalOperation> {
 		return Promise.resolve(new InMemoryTransaction(this._dict));
 	}
 }
 
-class InMemoryTransaction implements KeyValueDb.TransactionalOperation {
+class InMemoryTransaction extends FDisposableBase implements KeyValueDb.TransactionalOperation {
 	private readonly _parentDict: Map<KeyValueDb.Key, KeyValueDb.Value>;
 	private readonly _lockDict: Map<KeyValueDb.Key, KeyValueDb.Value | null>;
 	private readonly _transactionDict: Map<KeyValueDb.Key, KeyValueDb.Value>;
 	private _completed: boolean;
 
 	public constructor(parentDict: Map<KeyValueDb.Key, KeyValueDb.Value>) {
+		super();
 		this._parentDict = parentDict;
 		this._lockDict = new Map();
 		this._transactionDict = new Map();
 		this._completed = false;
 	}
 
-	public commit(executionContext: FExecutionContext): Promise<void> {
+	public commit(_executionContext: FExecutionContext): Promise<void> {
 		this._completed = true;
 
 		const concurrencyKeys: Array<KeyValueDb.Key> = [];
@@ -155,14 +156,14 @@ class InMemoryTransaction implements KeyValueDb.TransactionalOperation {
 		return Promise.resolve();
 	}
 
-	public dispose(): Promise<void> {
+	protected override onDispose(): Promise<void> {
 		this._completed = true;
 		this._lockDict.clear();
 		this._transactionDict.clear();
 		return Promise.resolve();
 	}
 
-	public find(executionContext: FExecutionContext, key: string): Promise<string | null> {
+	public find(_executionContext: FExecutionContext, key: string): Promise<string | null> {
 		this.verifyCompleted();
 
 		const transactionValue: KeyValueDb.Value | undefined = this._transactionDict.get(key);
@@ -185,7 +186,7 @@ class InMemoryTransaction implements KeyValueDb.TransactionalOperation {
 		}
 	}
 
-	public get(executionContext: FExecutionContext, key: string): Promise<string> {
+	public get(_executionContext: FExecutionContext, key: string): Promise<string> {
 		this.verifyCompleted();
 
 		const transactionValue: KeyValueDb.Value | undefined = this._transactionDict.get(key);
@@ -210,7 +211,7 @@ class InMemoryTransaction implements KeyValueDb.TransactionalOperation {
 		throw new KeyValueDb.NoSuchKeyError(key);
 	}
 
-	public set(executionContext: FExecutionContext, key: KeyValueDb.Key, value: KeyValueDb.Value | null): Promise<KeyValueDb.Value | null> {
+	public set(_executionContext: FExecutionContext, key: KeyValueDb.Key, value: KeyValueDb.Value | null): Promise<KeyValueDb.Value | null> {
 		this.verifyCompleted();
 
 		const oldTransactionValue: KeyValueDb.Value | undefined = this._transactionDict.get(key);

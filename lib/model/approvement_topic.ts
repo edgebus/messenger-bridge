@@ -1,4 +1,4 @@
-import { ApprovementTopicName } from "./Primitives";
+import { ApprovementTopicName } from "./primitives.js";
 
 export interface ApprovementTopic {
 	readonly name: ApprovementTopicName;
@@ -16,3 +16,5 @@ export interface ApprovementTopic {
 
 	readonly schema: string | null;
 }
+
+export type ApprovementTopicMap = ReadonlyMap<ApprovementTopicName, ApprovementTopic>;

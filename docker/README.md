@@ -2,7 +2,7 @@
 
 ### Build
 ```shell
-docker build --tag zxteamorg/messenger-bridge/local --file docker/Dockerfile .
+docker build --tag edgebus.example.org/messenger-bridge/local --file docker/Dockerfile .
 ```
 
 ### Run
@@ -11,7 +11,7 @@ docker build --tag zxteamorg/messenger-bridge/local --file docker/Dockerfile .
 docker run --rm --interactive \
   --env DEBUG_WAIT=yes \
   --publish 9229:9229 \
-  zxteamorg/messenger-bridge/local
+  edgebus.example.org/messenger-bridge/local
 ```
 
 ### Debug
@@ -19,18 +19,18 @@ docker run --rm --interactive \
 ```shell
 docker run --rm --interactive --tty \
   --entrypoint /bin/sh \
-  zxteamorg/messenger-bridge/local
+  edgebus.example.org/messenger-bridge/local
 ```
 
 ## Auto Tests
 
 ### Build Tests
 ```shell
-docker build --tag zxteamorg/messenger-bridge/local --file docker/Dockerfile .
-docker build --tag zxteamorg/messenger-bridge/local-tests --file docker-tests/Dockerfile.tests .
+docker build --tag edgebus.example.org/messenger-bridge/local --file docker/Dockerfile .
+docker build --tag edgebus.example.org/messenger-bridge/local.test --file docker/Dockerfile.test .
 ```
 
 ### Run Tests
 ```shell
-docker run --interactive --rm zxteamorg/messenger-bridge/local-tests
+docker run --interactive --rm edgebus.example.org/messenger-bridge/local.test
 ```

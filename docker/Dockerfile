@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=node:16-alpine
+ARG BASE_IMAGE=node:22-alpine
 
 # BUILD_CONFIGURATION is local, snapshot or release
 ARG BUILD_CONFIGURATION=local
@@ -48,16 +48,16 @@ COPY .npmrc README.md tsconfig.json tsconfig-dist.json tslint.json ./
 RUN ls -l && npm run build:dist
 RUN cd .dist && npm install --omit=dev --no-progress
 RUN chown root:root -R .dist
-COPY docker/docker-entrypoint.sh /stage/usr/local/bin/
-RUN mkdir -p /stage/usr/local/zxteamorg/
-RUN mv .dist /stage/usr/local/zxteamorg/messenger-bridge
-COPY messenger-bridge.toml /stage/etc/zxteamorg/messenger-bridge/messenger-bridge.toml
+COPY docker/docker-entrypoint.sh /stage/usr/local/bin/docker-entrypoint-edgebus-messenger-bridge.sh
+RUN mkdir -p /stage/usr/local/edgebus/
+RUN mv .dist /stage/usr/local/edgebus/messenger-bridge
+COPY messenger-bridge.toml /stage/etc/edgebus/messenger-bridge/messenger-bridge.toml
 
 FROM builder1_base AS builder1_local
-ONBUILD COPY messenger-bridge-devel.toml /stage/etc/zxteamorg/messenger-bridge/messenger-bridge-devel.toml
+ONBUILD COPY messenger-bridge-devel.toml /stage/etc/edgebus/messenger-bridge/messenger-bridge-devel.toml
 
 FROM builder1_base AS builder1_snapshot
-ONBUILD COPY messenger-bridge-devel.toml /stage/etc/zxteamorg/messenger-bridge/messenger-bridge-devel.toml
+ONBUILD COPY messenger-bridge-devel.toml /stage/etc/edgebus/messenger-bridge/messenger-bridge-devel.toml
 
 FROM builder1_base AS builder1_release
 # Nothing special for 'release' at build phase yet
@@ -120,5 +120,5 @@ FROM imager_${BUILD_CONFIGURATION}
 ENV DO_INIT_SLEEP=0
 COPY --from=compositor /stage/ /
 EXPOSE 8080 8443
-ENTRYPOINT [ "/usr/local/bin/docker-entrypoint.sh" ]
-CMD ["--config-toml-file=/etc/zxteamorg/messenger-bridge/messenger-bridge.toml","--config-env"]
+ENTRYPOINT [ "/usr/local/bin/docker-entrypoint-edgebus-messenger-bridge.sh" ]
+CMD ["--config-toml-file=/etc/edgebus/messenger-bridge/messenger-bridge.toml","--config-env"]

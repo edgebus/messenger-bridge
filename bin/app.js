@@ -1,42 +1,58 @@
 #!/usr/bin/env node
 
-const { Flauncher } = require("@freemework/hosting");
-// const { Container  } = require("typescript-ioc");
+import { FLogger, FLoggerLevel } from "@freemework/common";
+import { FLauncher } from "@freemework/hosting";
 
-const fs = require("fs");
+import fs from "fs";
+import { createRequire } from "module";
 
-const { default: runtimeFactory, Configuration } = require("..");
+import {
+	Monitoring, MonitoringImpl,
+	SingletonProviderExecutionContext,
+	Service, ServiceImpl,
+	Settings,
+	bootstrap,
+	createLoggerFactory,
+	createLoggerSettings,
+} from "../lib/index.js";
 
+const require = createRequire(import.meta.url);
 
-// Contract providers
-//
-
-// Implementation providers
-//
+// const __dirname = import.meta.dirname;
+const __filename = import.meta.filename;
 
 console.log(fs.readFileSync(__filename.replace(/.js$/, ".logo")).toString());
 const { name: serviceName, version: serviceVersion } = require("../package.json");
 console.log(`Package: ${serviceName}@${serviceVersion}\n`);
 
+{
+	// Configure logger
+	const loggerSettings = createLoggerSettings();
+	const loggerFactory = createLoggerFactory(
+		FLoggerLevel.parse(loggerSettings.logLevel.toUpperCase()),
+		loggerSettings.logFormat,
+	);
+	FLogger.setLoggerFactory(loggerFactory);
+}
 
-// DI Configuration
-//
+async function createRuntime(bootstrapExecutionContext, settings) {
+	let appExecutionContext = bootstrapExecutionContext;
 
-// registerShutdownHook(async function () {
-// 	await new Promise(function (resolve) {
-// 		function guardForMissingLoggerCallback() {
-// 			// This guard resolve promise, if log4js does not call shutdown callback
-// 			resolve();
-// 		}
-// 		const timeout = setTimeout(guardForMissingLoggerCallback, 5000);
-// 		require('log4js').shutdown(function (log4jsErr) {
-// 			if (log4jsErr) {
-// 				console.error("Failure log4js.shutdown:", log4jsErr);
-// 			}
-// 			clearTimeout(timeout);
-// 			resolve();
-// 		});
-// 	});
-// });
+	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, Monitoring, new MonitoringImpl());
+	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, Service, new ServiceImpl({
+		approvementTopics: settings.approvementTopics,
+		messengers: settings.messengers,
+	}));
 
-Flauncher(Configuration.parse, runtimeFactory);
+	const runtime = await bootstrap(
+		appExecutionContext,
+		{
+			settings,
+		},
+	);
+
+	return runtime;
+}
+
+// Launch the app
+FLauncher(Settings.fromConfiguration, createRuntime);

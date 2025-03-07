@@ -1,24 +1,53 @@
-import { FCancellationTokenSourceManual, FDisposable, FException, FExceptionArgument, FExceptionCancelled, FExceptionInvalidOperation, FExecutionContext, FExecutionContextCancellation, FExecutionContextLogger, FInitable, FInitableBase, FLogger } from "@freemework/common";
+import {
+	FCancellationException,
+	FCancellationExecutionContext,
+	FCancellationTokenSourceManual,
+	FDisposable,
+	FException,
+	FExceptionArgument,
+	FExceptionInvalidOperation,
+	FExecutionContext,
+	FInitable,
+	FInitableBase,
+	FLogger,
+} from "@freemework/common";
 
 import * as _ from "lodash";
 import { v4 as uuid } from "uuid";
 
-import { Configuration } from "./Configuration";
-import { Messenger } from "./messenger/Messenger";
-import { TelegramMessenger } from "./messenger/TelegramMessenger";
-import { ApprovementId, ApprovementTopicName } from "./model/Primitives";
-import { Approvement } from "./model/Approvement";
-import { ApprovementTopic } from "./model/ApprovementTopic";
-import { KeyValueDb, InMemory } from "./misc/KeyValueDb";
-import { Bind } from "./misc/Bind";
-import { Approver } from "./model/Approver";
+import { Settings } from "../settings.js";
+import { BaseMessenger } from "../messenger/_base.messenger.js";
+import { TelegramMessenger } from "../messenger/telegram.messenger.js";
+import { ApprovementId, ApprovementTopicName } from "../model/primitives.js";
+import { Approvement } from "../model/approvement.js";
+import { Approver } from "../model/approver.js";
+import { ApprovementTopic, ApprovementTopicMap } from "../model/approvement_topic.js";
+import { KeyValueDb, InMemory } from "../misc/key_value_db.js";
+import { Bind } from "../utils/bind.js";
 
-export class Service extends FInitableBase {
+export abstract class Service extends FInitableBase {
+	public abstract get approvementTopics(): ReadonlyMap<ApprovementTopicName, ApprovementTopic>;
+
+	public abstract createApprovement(
+		executionContext: FExecutionContext, approvementTopicName: string, renderData: any
+	): Promise<Approvement>;
+
+	public abstract getApprovement(
+		_executionContext: FExecutionContext,
+		approvementTopicName: ApprovementTopicName,
+		approvementId: ApprovementId
+	): Promise<Approvement & {
+		readonly status: "PENDING" | "APPROVED" | "REFUSED" | "EXPIRED";
+	}>;
+}
+
+export class ServiceImpl extends Service {
+	private readonly _logger: FLogger;
 	private readonly _workerSleepMs: number;
-	private readonly _configuration: Configuration;
+	// private readonly _configuration: Settings;
 	private readonly _kbDb: KeyValueDb;
 	private readonly _approvementTopics: Map<ApprovementTopicName, ApprovementTopic>;
-	private readonly _messengers: ReadonlyMap<Configuration.Messenger["name"], Messenger>;
+	private readonly _messengers: ReadonlyMap<Settings.Messenger["name"], BaseMessenger>;
 	private readonly _activeApprovements: Map<ApprovementId, ServiceInternal.ApprovementBundle>;
 	private readonly _completedApprovements: Map<ApprovementId, ServiceInternal.ApprovementBundle>;
 	private readonly _expiredApprovements: Map<ApprovementId, ServiceInternal.ApprovementBundle>;
@@ -26,9 +55,13 @@ export class Service extends FInitableBase {
 	private _workerTimeout: NodeJS.Timeout | null;
 	private _safeWorkerTask: Promise<void> | null;
 
-	public constructor(configuration: Configuration) {
+	public constructor(settings: {
+		readonly messengers: Settings.MessengerMap;
+		readonly approvementTopics: ApprovementTopicMap;
+	}) {
 		super();
-		this._configuration = configuration;
+		this._logger = FLogger.create(this.constructor.name);
+		// this._configuration = configuration;
 		this._disposeCancellationTokenSource = new FCancellationTokenSourceManual();
 		this._workerSleepMs = 5000;
 		this._workerTimeout = null;
@@ -36,14 +69,14 @@ export class Service extends FInitableBase {
 
 		this._kbDb = new InMemory();
 
-		const messengers: Map<Configuration.Messenger["name"], Messenger> = new Map();
+		const messengers: Map<Settings.Messenger["name"], BaseMessenger> = new Map();
 
 		this._approvementTopics = new Map();
-		for (const [topicName, topicConfiguration] of configuration.approvement.topics) {
+		for (const [topicName, topicConfiguration] of settings.approvementTopics) {
 			this._approvementTopics.set(topicName, topicConfiguration);
 		}
 
-		for (const [messengerName, messengerConfiguration] of configuration.messengers) {
+		for (const [messengerName, messengerConfiguration] of settings.messengers) {
 			switch (messengerConfiguration.type) {
 				case "slack":
 					throw new FExceptionInvalidOperation("Not implemented yet");
@@ -78,7 +111,7 @@ export class Service extends FInitableBase {
 					break;
 				}
 				default:
-					throw new Configuration.Messenger.UnreachableMessengerType(messengerConfiguration);
+					throw new Settings.Messenger.UnreachableMessengerType(messengerConfiguration);
 
 			}
 		}
@@ -90,12 +123,15 @@ export class Service extends FInitableBase {
 	}
 
 	public get approvementTopics(): ReadonlyMap<ApprovementTopicName, ApprovementTopic> {
+		this.verifyInitializedAndNotDisposed();
+
 		return this._approvementTopics;
 	}
 
 	public async createApprovement(
 		executionContext: FExecutionContext, approvementTopicName: string, renderData: any
 	): Promise<Approvement> {
+		this.verifyInitializedAndNotDisposed();
 
 		const approvementTopic: ApprovementTopic | undefined = this._approvementTopics.get(approvementTopicName);
 		if (approvementTopic === undefined) {
@@ -108,10 +144,10 @@ export class Service extends FInitableBase {
 		const approvementId: ApprovementId = uuid();
 		const expireAt: Date = new Date(Date.now() + approvementTopic.expireTimeout * 1000);
 
-		const approvementMessageTokens: Array<Messenger.ApprovementMessageToken> = [];
+		const approvementMessageTokens: Array<BaseMessenger.ApprovementMessageToken> = [];
 		for (const messenger of this._messengers.values()) {
 			if (messenger.isBoundToApprovementTopic(approvementTopicName)) {
-				const approvementMessageToken: Messenger.ApprovementMessageToken = await messenger.registerApprovement(
+				const approvementMessageToken: BaseMessenger.ApprovementMessageToken = await messenger.registerApprovement(
 					executionContext, approvementTopicName, approvementId, renderData
 				);
 				approvementMessageTokens.push(approvementMessageToken);
@@ -141,12 +177,14 @@ export class Service extends FInitableBase {
 	}
 
 	public async getApprovement(
-		executionContext: FExecutionContext,
+		_executionContext: FExecutionContext,
 		approvementTopicName: ApprovementTopicName,
 		approvementId: ApprovementId
 	): Promise<Approvement & {
 		readonly status: "PENDING" | "APPROVED" | "REFUSED" | "EXPIRED";
 	}> {
+		this.verifyInitializedAndNotDisposed();
+
 		{ // scope
 			const activeApprovementBundle: ServiceInternal.ApprovementBundle | undefined = this._activeApprovements.get(approvementId);
 			if (activeApprovementBundle !== undefined) {
@@ -193,9 +231,7 @@ export class Service extends FInitableBase {
 	}
 
 	protected async onInit(): Promise<void> {
-		const logger: FLogger = FExecutionContextLogger.of(this.initExecutionContext).logger;
-
-		logger.debug("Initializing...");
+		this._logger.debug(this.initExecutionContext, "Initializing...");
 		await FInitable.initAll(this.initExecutionContext, ...this._messengers.values());
 		try {
 			this._workerTimeout = setTimeout(this._backgroundWorker, this._workerSleepMs);
@@ -203,13 +239,11 @@ export class Service extends FInitableBase {
 			await FDisposable.disposeAll(...this._messengers.values());
 			throw e;
 		}
-		logger.debug("Initialized.");
+		this._logger.debug(this.initExecutionContext, "Initialized.");
 	}
 
 	protected async onDispose(): Promise<void> {
-		const logger: FLogger = FExecutionContextLogger.of(this.initExecutionContext).logger;
-
-		logger.debug("Disposing...");
+		this._logger.debug(this.initExecutionContext, "Disposing...");
 
 		if (this._workerTimeout !== null) {
 			clearTimeout(this._workerTimeout);
@@ -228,18 +262,16 @@ export class Service extends FInitableBase {
 		}
 		await FDisposable.disposeAll(...this._messengers.values());
 
-		logger.debug("Disposed");
+		this._logger.debug(this.initExecutionContext, "Disposed");
 	}
 
 	@Bind
-	private async _onApprove(executionContext: FExecutionContext, event: Messenger.ApprovementEvent) {
-		const logger: FLogger = FExecutionContextLogger.of(executionContext).logger;
+	private async _onApprove(executionContext: FExecutionContext, event: BaseMessenger.ApprovementEvent) {
+		const logger: FLogger = this._logger;
 
 		const approvementBundle: ServiceInternal.ApprovementBundle | undefined = this._activeApprovements.get(event.approvementId);
 		if (approvementBundle === undefined) {
-			if (logger.isInfoEnabled) {
-				logger.warn(`Unexpected approve event. Approvement with id '${event.approvementId}' does not register.`);
-			}
+			logger.warn(executionContext, () => `Unexpected approve event. Approvement with id '${event.approvementId}' does not register.`);
 			return;
 		}
 
@@ -251,7 +283,7 @@ export class Service extends FInitableBase {
 			|| approvementBundle.approvement.refuseBy !== null && approvementBundle.approvement.refuseBy.equalTo(event.data)
 		) {
 			if (logger.isDebugEnabled) {
-				logger.debug(`Clickable user detected. Data: '${event.data.toString()}'`);
+				logger.debug(executionContext, () => `Clickable user detected. Data: '${event.data.toString()}'`);
 			}
 			return;
 		}
@@ -261,7 +293,7 @@ export class Service extends FInitableBase {
 			|| approvementBundle.approvement.refuseBy !== null
 		) {
 			if (logger.isDebugEnabled) {
-				logger.debug(`Approvement '${event.approvementId}' already completed.`);
+				logger.debug(executionContext, () => `Approvement '${event.approvementId}' already completed.`);
 			}
 			return;
 		}
@@ -308,13 +340,13 @@ export class Service extends FInitableBase {
 	}
 
 	@Bind
-	private async _onRefuse(executionContext: FExecutionContext, event: Messenger.ApprovementEvent) {
-		const logger: FLogger = FExecutionContextLogger.of(executionContext).logger;
+	private async _onRefuse(executionContext: FExecutionContext, event: BaseMessenger.ApprovementEvent) {
+		const logger: FLogger = this._logger;
 
 		const approvementBundle: ServiceInternal.ApprovementBundle | undefined = this._activeApprovements.get(event.approvementId);
 		if (approvementBundle === undefined) {
 			if (logger.isInfoEnabled) {
-				logger.warn(`Unexpected approve event. Approvement with id '${event.approvementId}' does not register.`);
+				logger.warn(executionContext, () => `Unexpected approve event. Approvement with id '${event.approvementId}' does not register.`);
 			}
 			return;
 		}
@@ -327,7 +359,7 @@ export class Service extends FInitableBase {
 			|| approvementBundle.approvement.refuseBy !== null && approvementBundle.approvement.refuseBy.equalTo(event.data)
 		) {
 			if (logger.isDebugEnabled) {
-				logger.debug(`Clickable user detected. Data: '${event.data.toString()}'`);
+				logger.debug(executionContext, () => `Clickable user detected. Data: '${event.data.toString()}'`);
 			}
 			return;
 		}
@@ -337,7 +369,7 @@ export class Service extends FInitableBase {
 			|| approvementBundle.approvement.refuseBy !== null
 		) {
 			if (logger.isDebugEnabled) {
-				logger.debug(`Approvement '${event.approvementId}' already completed.`);
+				logger.debug(executionContext, () => `Approvement '${event.approvementId}' already completed.`);
 			}
 			return;
 		}
@@ -368,23 +400,24 @@ export class Service extends FInitableBase {
 	private _backgroundWorker(): void {
 		if (this.disposing || this.disposed) { return; }
 
-		const logger: FLogger = FExecutionContextLogger.of(this.initExecutionContext).logger;
+		const logger: FLogger = this._logger;
+		const executionContext = this.initExecutionContext;
 
 		if (this._safeWorkerTask) {
-			logger.error("[BUG] Illegal operation at current state. Previous worker is not completed yet.");
+			logger.error(executionContext, () => "[BUG] Illegal operation at current state. Previous worker is not completed yet.");
 			return;
 		}
 
 		this._safeWorkerTask = this._backgroundWorkerJob()
 			.catch(reason => {
-				if (reason instanceof FExceptionCancelled) {
-					logger.debug("Worker job was cancelled.");
+				if (reason instanceof FCancellationException) {
+					logger.debug(executionContext, () => "Worker job was cancelled.");
 					return;
 				}
 
 				const err = FException.wrapIfNeeded(reason);
-				if (logger.isInfoEnabled) { logger.info(`Worker job failure. Error: ${err.message}`); }
-				logger.trace(`Worker job failure.`, err);
+				logger.info(executionContext, () => `Worker job failure. Error: ${err.message}`);
+				logger.trace(executionContext, () => `Worker job failure.`, err);
 			})
 			.finally(() => {
 				this._safeWorkerTask = null;
@@ -403,17 +436,18 @@ export class Service extends FInitableBase {
 		}
 
 		if (expiredApprovements.length > 0) {
-			const executionContext: FExecutionContext = new FExecutionContextCancellation(
-				FExecutionContext.None,
-				this._disposeCancellationTokenSource.token
+			const executionContext: FExecutionContext = new FCancellationExecutionContext(
+				FExecutionContext.Default,
+				this._disposeCancellationTokenSource.token,
+				true,
 			);
 
-			const logger: FLogger = FExecutionContextLogger.of(executionContext).logger;
+			const logger: FLogger = this._logger;
 
 			for (const approvementId of expiredApprovements) {
 				const approvementBundle: ServiceInternal.ApprovementBundle | undefined = this._activeApprovements.get(approvementId);
 				if (approvementBundle === undefined) {
-					logger.error("[BUG] Illegal operation at current state. ApprovementBundle marked for expire, but not presents inside approvements dictionary.");
+					logger.error(executionContext, () => "[BUG] Illegal operation at current state. ApprovementBundle marked for expire, but not presents inside approvements dictionary.");
 					continue;
 				}
 				this._activeApprovements.delete(approvementId);
@@ -438,7 +472,7 @@ export namespace Service {
 	};
 
 	export class ServiceError extends Error {
-		public get name(): string {
+		public override get name(): string {
 			return this.constructor.name;
 		}
 	}
@@ -452,6 +486,6 @@ export namespace Service {
 namespace ServiceInternal {
 	export interface ApprovementBundle {
 		readonly approvement: Approvement;
-		readonly messageTokens: Array<Messenger.ApprovementMessageToken>;
+		readonly messageTokens: Array<BaseMessenger.ApprovementMessageToken>;
 	}
 }

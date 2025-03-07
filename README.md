@@ -2,7 +2,8 @@
 
 **MESSENGER BRIDGE** is a helper service with unified API for easy integration with messenger networks like Telegram, Slack, etc...
 
-## Roadmap
+## Roadmap 2025
+
 * Approvement API allows to execute collective responsibility actions by make voting poll in a chat.
 	* [x] Minimum viable product
 	* [ ] `Approvement Topic` authorization
@@ -11,13 +12,18 @@
 	* [ ] Demo usage via WebSocket on Welcome Page
 * [ ] Commander API allows to call external HTTP API via commands in a chat.
 * [ ] Notification API allows to map HTTP callbacks to messages in a chat.
+* [ ] Questionnaire Workflows
 
 ## Quick Start
 
 Run **MESSENGER BRIDGE** inside Docker and use it in few seconds.
 
 ```bash
-docker run --rm --interactive --tty --env TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11 zxteamorg/messenger-bridge
+# release build
+docker run --rm --interactive --tty --env TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11 theanurin/messenger-bridge
+docker run --rm --interactive --tty --env TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11 ghcr.io/edgebus/messenger-bridge
+# snapshot build
+docker run --rm --interactive --tty --env TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11 ghcr.io/edgebus/messenger-bridge/snapshot
 ```
 
 Pass your Telegram bot's token into TELEGRAM_BOT_TOKEN environment variable and start to talk with your bot `/start @your_telegram_bot`.
