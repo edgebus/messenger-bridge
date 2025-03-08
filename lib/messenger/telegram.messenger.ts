@@ -21,7 +21,7 @@ import { Settings } from "../settings.js";
 import { Bind } from "../utils/bind.js";
 import { BaseMessenger } from "./_base.messenger.js";
 import { ApprovementId, ApprovementTopicName } from "../model/primitives.js";
-import { KeyValueDb } from "../misc/key_value_db.js";
+import { KeyValueDb } from "../database/memory/memory.database.js";
 import { ApprovementTopic } from "../model/approvement_topic.js";
 import { Approver } from "../model/approver.js";
 

@@ -1,10 +1,12 @@
 import {
 	FException,
+	FExecutionContext,
 	FLogger,
 	FLoggerBase,
 	FLoggerConsole,
 	FLoggerLabels,
 	FLoggerLevel,
+	FLoggerMessageFactory,
 } from "@freemework/common";
 
 import { Mutable } from "./typescript.utils";
@@ -106,13 +108,13 @@ class FLoggerElasticFriendlyJsonViaConsole extends FLoggerBaseWithLevel {
 		return logMessage;
 	}
 
-	protected log(level: FLoggerLevel, labels: FLoggerLabels, message: string, exception?: FException): void {
+	protected override writeLog(level: FLoggerLevel, labels: FLoggerLabels, message: string, ex?: FException): void {
 		const logMessage: string = FLoggerElasticFriendlyJsonViaConsole.formatElasticMessage(
 			this.name,
 			level,
 			labels,
 			message,
-			exception,
+			ex,
 		);
 		switch (level) {
 			case FLoggerLevel.TRACE:

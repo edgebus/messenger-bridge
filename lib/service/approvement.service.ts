@@ -22,7 +22,7 @@ import { ApprovementId, ApprovementTopicName } from "../model/primitives.js";
 import { Approvement } from "../model/approvement.js";
 import { Approver } from "../model/approver.js";
 import { ApprovementTopic, ApprovementTopicMap } from "../model/approvement_topic.js";
-import { KeyValueDb, InMemory } from "../misc/key_value_db.js";
+import { KeyValueDb, InMemory } from "../database/memory/memory.database.js";
 import { Bind } from "../utils/bind.js";
 
 export abstract class Service extends FInitableBase {

@@ -1,5 +1,6 @@
 export { createLoggerFactory } from "./utils/logger_factory.js";
 export { type LoggerSettings, createLoggerSettings } from "./utils/logger_settings.js";
+export { DatabaseFactory } from "./database/index.js";
 // export { FactoryProviderExecutionContext, FactoryProviderExecutionElement } from "./utils/factory_provider_execution_context.js";
 export { SingletonProviderExecutionContext, SingletonProviderExecutionElement } from "./utils/singleton_provider_execution_context.js";
 export { appInfo } from "./app-info.js";
@@ -18,6 +19,7 @@ import {
 	makeDisposable
 } from "@freemework/common";
 import { createWebServers, FWebServer } from "@freemework/hosting";
+import { FSqlConnectionFactoryPostgres } from "@freemework/sql.postgres";
 
 import { EventEmitter } from 'events'
 import express from "express";
@@ -46,6 +48,9 @@ import {
 } from "./endpoint/index.js";
 import { Monitoring } from "./service/monitoring.service.js";
 import { Service } from "./service/approvement.service.js";
+import { DatabaseFactory,  } from "./database/index.js";
+import { WorkflowCache, WorkflowRunner } from "./2nd/workflow/index.js";
+import { WorkflowDatabaseFactory } from "./2nd/workflow/workflow_database.js";
 
 const __dirname: string = import.meta.dirname;
 
@@ -73,8 +78,25 @@ export async function bootstrap(
 	EventEmitter.defaultMaxListeners = 25;
 	bootstrapLogger.trace(executionContext, () => `Set EventEmitter.defaultMaxListeners to ${EventEmitter.defaultMaxListeners}`);
 
+	const { instance: databaseFactory } = SingletonProviderExecutionContext.of(executionContext, DatabaseFactory);
 	const { instance: monitoring } = SingletonProviderExecutionContext.of(executionContext, Monitoring);
 	const { instance: service } = SingletonProviderExecutionContext.of(executionContext, Service);
+	const { instance: sqlConnectionFactory } = SingletonProviderExecutionContext.of(executionContext, FSqlConnectionFactoryPostgres);
+	
+
+	// const { instance: workflowCache } = SingletonProviderExecutionContext.of(executionContext, WorkflowCache);
+	const workflowCache: WorkflowCache = WorkflowCache.fromConnectivityUrl(settings.cacheConnectivity.url);
+
+	// const { instance: workflowCache } = SingletonProviderExecutionContext.of(executionContext, WorkflowCache);
+	const workflowDatabaseFactory: WorkflowDatabaseFactory = WorkflowDatabaseFactory.fromSqlConnectionFactory(sqlConnectionFactory);
+
+	// const { instance: workflowRunner } = SingletonProviderExecutionContext.of(executionContext, WorkflowRunner);
+	const workflowRunner: WorkflowRunner = new WorkflowRunner(
+		workflowCache,
+		workflowDatabaseFactory,
+		// Workflow Runner tags
+		process.env['BUILD_CONFIGURATION'] !== 'release' ? ['dev'] : ['production'],
+	);
 
 	let isConfigured = false;
 
@@ -109,6 +131,10 @@ export async function bootstrap(
 	bootstrapLogger.trace(executionContext, "Initializing all parts of the service ...");
 	await FInitable.initAll(executionContext,
 		...servers,
+		sqlConnectionFactory,
+		databaseFactory,
+		workflowCache,
+		workflowRunner,
 	);
 
 	const disposableItems: Array<FDisposable> = [
@@ -118,8 +144,23 @@ export async function bootstrap(
 				return server.dispose();
 			})
 		),
+		sqlConnectionFactory,
+		databaseFactory,
+		workflowCache,
+		workflowRunner,
 	].reverse();
+
 	try {
+		await databaseFactory.waitForServer(executionContext, 10000);
+
+		{ // local scope
+			bootstrapLogger.trace(executionContext, "Reading database versions...");
+			await using db = await databaseFactory.create(executionContext);
+			const versions: Array<string> = await db.listVersions(executionContext);
+			const versionChain: string = versions.join(" -> ");
+			bootstrapLogger.info(executionContext, `Database versions chain: ${versionChain}`);
+		}
+
 		const serversMap: Map<FWebServer["name"], FWebServer> = new Map(servers.map(s => [s.name, s]));
 
 		if (hooks !== undefined && hooks.hookBeforeEndpointRegistration !== undefined) {
@@ -128,10 +169,10 @@ export async function bootstrap(
 
 		const resources: Array<FInitable> = [];
 
-		if(service instanceof FInitable) {
+		if (service instanceof FInitable) {
 			resources.push(service);
 		}
-		if(monitoring instanceof FInitable) {
+		if (monitoring instanceof FInitable) {
 			resources.push(monitoring);
 		}
 
@@ -159,7 +200,7 @@ export async function bootstrap(
 					resources.push(new ReadinessEndpoint(endpointServers, endpointSettings));
 					break;
 				case "rest":
-					resources.push(new RestEndpoint(endpointServers, endpointSettings, service));
+					resources.push(new RestEndpoint(endpointServers, endpointSettings, service, workflowCache, workflowDatabaseFactory, workflowRunner,));
 					break;
 				case "websocket":
 					resources.push(new LivenessEndpoint(endpointServers, endpointSettings));

@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
-import { FLogger, FLoggerLevel } from "@freemework/common";
+import { FDecimal, FLogger, FLoggerLevel } from "@freemework/common";
+import { FDecimalBackendBigNumber } from "@freemework/decimal.bignumberjs";
 import { FLauncher } from "@freemework/hosting";
+import { FSqlConnectionFactoryPostgres } from '@freemework/sql.postgres';
 
 import fs from "fs";
 import { createRequire } from "module";
 
 import {
+	DatabaseFactory,
 	Monitoring, MonitoringImpl,
 	SingletonProviderExecutionContext,
 	Service, ServiceImpl,
@@ -15,6 +18,8 @@ import {
 	createLoggerFactory,
 	createLoggerSettings,
 } from "../lib/index.js";
+
+import { Activity } from "../lib/2nd/workflow/activities/Activity.js";
 
 const require = createRequire(import.meta.url);
 
@@ -35,9 +40,23 @@ console.log(`Package: ${serviceName}@${serviceVersion}\n`);
 	FLogger.setLoggerFactory(loggerFactory);
 }
 
+// Configure decimal limit and default rounding behavior
+FDecimal.configure(new FDecimalBackendBigNumber(24, 'Trunc'));
+
+// Configure workflow versioning
+Activity.appVersion = serviceVersion;
+
 async function createRuntime(bootstrapExecutionContext, settings) {
 	let appExecutionContext = bootstrapExecutionContext;
 
+	const sqlConnectionFactory = new FSqlConnectionFactoryPostgres({
+		url: settings.databaseConnectivity.url,
+		log: FLogger.create("PostgresDB"),
+		applicationName: `${serviceName} v${serviceVersion}`,
+	});
+
+	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, FSqlConnectionFactoryPostgres, sqlConnectionFactory);
+	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, DatabaseFactory, DatabaseFactory.fromSqlConnectionFactory(sqlConnectionFactory));
 	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, Monitoring, new MonitoringImpl());
 	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, Service, new ServiceImpl({
 		approvementTopics: settings.approvementTopics,

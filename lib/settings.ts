@@ -1,4 +1,4 @@
-import { FExceptionInvalidOperation, FException, FConfiguration } from "@freemework/common";
+import { FExceptionInvalidOperation, FException, FConfiguration, FConfigurationValue, FConfigurationException } from "@freemework/common";
 import { FHostingSettings } from "@freemework/hosting";
 
 import * as _ from "lodash";
@@ -27,6 +27,16 @@ export class Settings {
 		 * ???
 		 */
 		public readonly approvementTopics: ApprovementTopicMap,
+
+		/**
+		 * URL Connectivity to your Database instance
+		 */
+		public readonly databaseConnectivity: Settings.URLConnectivity,
+
+		/**
+		 * URL Connectivity to your Cache instance
+		 */
+		public readonly cacheConnectivity: Settings.URLConnectivity,
 	) { }
 
 	public static fromConfiguration(configuration: FConfiguration): Settings {
@@ -54,11 +64,21 @@ export class Settings {
 				})
 		);
 
+		const databaseConnectivity: Settings.URLConnectivity = runtimeConfiguration.hasNamespace("database")
+			? Settings.readUrlConnectivity(runtimeConfiguration.getNamespace("database"))
+			: IN_MEMORY_DATABASE_URL_CONNECTIVITY;
+
+		const cacheConnectivity: Settings.URLConnectivity = runtimeConfiguration.hasNamespace("cache")
+			? Settings.readUrlConnectivity(runtimeConfiguration.getNamespace("cache"))
+			: IN_MEMORY_DATABASE_URL_CONNECTIVITY;
+
 		return new Settings(
 			Object.freeze(servers),
 			Object.freeze(endpoints),
 			Object.freeze(messengers),
 			Object.freeze(approvementTopics),
+			databaseConnectivity,
+			cacheConnectivity,
 		);
 	}
 
@@ -223,6 +243,46 @@ export class Settings {
 			schema: topicConfiguration.has("schema") ? topicConfiguration.get("schema").asString : null
 		});
 	}
+
+	protected static readUrlConnectivity(urlConnectivityConfiguration: FConfiguration): Settings.URLConnectivity {
+		const url: URL = urlConnectivityConfiguration.get("url").asUrl;
+		const ignoreStartupFailedConnection: boolean | null = urlConnectivityConfiguration
+			.get("ignoreStartupFailedConnection")
+			.asBooleanNullable;
+
+		{ // local scope
+			const userConfigurationValue: FConfigurationValue = urlConnectivityConfiguration.get("user", null);
+			const user: string | null = userConfigurationValue.asStringNullable;
+			if (user !== null && user !== "") {
+				if (url.username !== "") {
+					throw new FConfigurationException(
+						"Unable to override URL username. Define separate 'user' property may be used with empty URL username only.",
+						userConfigurationValue.key,
+					);
+				}
+				url.username = encodeURIComponent(user);
+			}
+		}
+
+		{ // local scope
+			const passwordConfigurationValue: FConfigurationValue = urlConnectivityConfiguration.get("password", null);
+			const password: string | null = passwordConfigurationValue.asStringNullable;
+			if (password !== null && password !== "") {
+				if (url.password !== "") {
+					throw new FConfigurationException(
+						"Unable to override URL password. Define separate 'password' property may be used with empty URL password only.",
+						passwordConfigurationValue.key,
+					);
+				}
+				url.password = encodeURIComponent(password);
+			}
+		}
+
+		return Object.freeze<Settings.URLConnectivity>({
+			url,
+			ignoreStartupFailedConnection: ignoreStartupFailedConnection !== null && ignoreStartupFailedConnection,
+		});
+	}
 }
 
 export namespace Settings {
@@ -320,6 +380,11 @@ export namespace Settings {
 	}
 	export type Messenger = Messenger.Slack | Messenger.Telegram;
 	export type MessengerMap = ReadonlyMap<Settings.Messenger["name"], Settings.Messenger>;
+
+	export interface URLConnectivity {
+		url: URL;
+		ignoreStartupFailedConnection: boolean;
+	}
 }
 
 export class ConfigurationException extends FException {
@@ -330,3 +395,8 @@ export class UnreachableNotSupportedEndpointException extends ConfigurationExcep
 		super(`Non supported endpoint type: ${JSON.stringify(endpointType)}`);
 	}
 }
+
+const IN_MEMORY_DATABASE_URL_CONNECTIVITY = Object.freeze<Settings.URLConnectivity>({
+	ignoreStartupFailedConnection: false,
+	url: new URL("memory://"),
+});

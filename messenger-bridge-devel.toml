@@ -6,6 +6,16 @@
 
 [io.edgebus.messenger-bridge.runtime]
 
+	[io.edgebus.messenger-bridge.runtime.cache]
+		# url = "memory://"
+		url = "redis://127.0.0.1:52001/0"
+
+	[io.edgebus.messenger-bridge.runtime.database]
+		url = "postgres://edgebus-local-messenger-bridge@127.0.0.1:52000/edgebus-local"
+		#url = "memory://"
+		#user = "dev"
+		#password = "devel"
+
 	[io.edgebus.messenger-bridge.runtime.approvement]
 
 		[[io.edgebus.messenger-bridge.runtime.approvement.topic]]
