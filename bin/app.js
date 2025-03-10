@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
-import { FDecimal, FLogger, FLoggerLevel } from "@freemework/common";
+import {
+	FDecimal,
+	FLogger,
+	FLoggerConsole,
+} from "@freemework/common";
 import { FDecimalBackendBigNumber } from "@freemework/decimal.bignumberjs";
 import { FLauncher } from "@freemework/hosting";
 import { FSqlConnectionFactoryPostgres } from '@freemework/sql.postgres';
@@ -11,12 +15,11 @@ import { createRequire } from "module";
 import {
 	DatabaseFactory,
 	Monitoring, MonitoringImpl,
+	LoggerSettings,
 	SingletonProviderExecutionContext,
 	Service, ServiceImpl,
 	Settings,
 	bootstrap,
-	createLoggerFactory,
-	createLoggerSettings,
 } from "../lib/index.js";
 
 import { Activity } from "../lib/2nd/workflow/activities/Activity.js";
@@ -32,12 +35,10 @@ console.log(`Package: ${serviceName}@${serviceVersion}\n`);
 
 {
 	// Configure logger
-	const loggerSettings = createLoggerSettings();
-	const loggerFactory = createLoggerFactory(
-		FLoggerLevel.parse(loggerSettings.logLevel.toUpperCase()),
-		loggerSettings.logFormat,
-	);
-	FLogger.setLoggerFactory(loggerFactory);
+	const loggerSettings = LoggerSettings.fromEnvironmentVariables();
+	FLogger.setLoggerFactory(function (loggerName) {
+		return FLoggerConsole.create(loggerName, loggerSettings);
+	});
 }
 
 // Configure decimal limit and default rounding behavior

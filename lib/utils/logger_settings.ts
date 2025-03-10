@@ -1,44 +1,51 @@
-export interface LoggerSettings {
-  readonly logLevel: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
-  readonly logFormat: 'json' | 'text';
-}
+import { FException, FExceptionArgument, FLoggerLevel } from "@freemework/common";
 
-export function createLoggerSettings(): LoggerSettings {
-  let { LOG_FORMAT, LOG_LEVEL } = process.env;
+export abstract class LoggerSettings {
+	public static fromEnvironmentVariables(): LoggerSettings {
+		let { LOG_FORMAT, LOG_LEVEL } = process.env;
 
-  if (LOG_FORMAT === undefined) {
-    LOG_FORMAT = 'text';
-    console.error(`LOG_FORMAT variable is not set. Fallback to '${LOG_FORMAT}' value.`);
-  }
+		if (LOG_FORMAT === undefined) {
+			LOG_FORMAT = 'text';
+			console.warn(`LOG_FORMAT variable is not set. Fallback to '${LOG_FORMAT}' value.`);
+		}
 
-  if (LOG_LEVEL === undefined) {
-    LOG_LEVEL = 'info';
-    console.error(`LOG_LEVEL variable is not set. Fallback to '${LOG_LEVEL}' value.`);
-  }
+		if (LOG_LEVEL === undefined) {
+			LOG_LEVEL = 'info';
+			console.warn(`LOG_LEVEL variable is not set. Fallback to '${LOG_LEVEL}' value.`);
+		}
 
-  const logFormat = LOG_FORMAT as LoggerSettings['logFormat'];
-  switch (logFormat) {
-    case 'json':
-    case 'text':
-      break;
-    default:
-      console.error(`Wrong value '${logFormat}' of LOG_FORMAT environment variable.`);
-      process.exit(126);
-  }
+		const logFormat = LOG_FORMAT as LoggerSettings["format"];
+		switch (logFormat) {
+			case 'json':
+			case 'text':
+				break;
+			default:
+				console.error(`Wrong value '${logFormat}' of LOG_FORMAT environment variable.`);
+				process.exit(126);
+		}
 
-  const logLevel = LOG_LEVEL as LoggerSettings['logLevel'];
-  switch (logLevel) {
-    case 'trace':
-    case 'debug':
-    case 'info':
-    case 'warn':
-    case 'error':
-    case 'fatal':
-      break;
-    default:
-      console.error(`Wrong value '${logLevel}' of LOG_LEVEL environment variable.`);
-      process.exit(127);
-  }
+		let logLevel: FLoggerLevel;
+		try { logLevel = FLoggerLevel.parse(LOG_LEVEL.toUpperCase()); }
+		catch (e) {
+			if (e instanceof FExceptionArgument) {
+				console.error(`Wrong value '${LOG_LEVEL}' of LOG_LEVEL environment variable.`);
+			} else {
+				const ex: FException = FException.wrapIfNeeded(e);
+				console.error(`Unexpected error while parsing value '${LOG_LEVEL}' of LOG_LEVEL environment variable. ${ex.message}.`);
+			}
+			process.exit(127);
+		}
 
-  return Object.freeze<LoggerSettings>({ logFormat, logLevel });
+		class LoggerSettingsImpl extends LoggerSettings {
+			public constructor(
+				public readonly level: FLoggerLevel,
+				public readonly format: 'json' | 'text',
+			) { super(); }
+		}
+
+		return new LoggerSettingsImpl(logLevel, logFormat);
+	}
+
+	public abstract get level(): FLoggerLevel;
+	public abstract get format(): 'json' | 'text';
 }

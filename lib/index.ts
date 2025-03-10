@@ -1,5 +1,5 @@
 export { createLoggerFactory } from "./utils/logger_factory.js";
-export { type LoggerSettings, createLoggerSettings } from "./utils/logger_settings.js";
+export { LoggerSettings } from "./utils/logger_settings.js";
 export { DatabaseFactory } from "./database/index.js";
 // export { FactoryProviderExecutionContext, FactoryProviderExecutionElement } from "./utils/factory_provider_execution_context.js";
 export { SingletonProviderExecutionContext, SingletonProviderExecutionElement } from "./utils/singleton_provider_execution_context.js";
