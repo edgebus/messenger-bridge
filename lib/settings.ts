@@ -45,23 +45,25 @@ export class Settings {
 		const servers: Array<FHostingSettings.WebServer> = FHostingSettings.fromConfigurationWebServers(runtimeConfiguration);
 		const endpoints: Array<Settings.Endpoint> = runtimeConfiguration.getArray("endpoint").map(Settings.readEndpoint);
 
-
 		const messengers: ReadonlyMap<Settings.Messenger["name"], Settings.Messenger> = new Map(
-			runtimeConfiguration
-				.getArray("messenger")
-				.map(function (messengerConfiguration: FConfiguration) {
-					const messenger = Settings.readMessenger(messengerConfiguration);
-					return [messenger.name, messenger];
-				})
+			runtimeConfiguration.hasNamespace("messenger") && runtimeConfiguration.has("messenger.indexes")
+				? runtimeConfiguration
+					.getArray("messenger")
+					.map(function (messengerConfiguration: FConfiguration) {
+						const messenger = Settings.readMessenger(messengerConfiguration);
+						return [messenger.name, messenger];
+					})
+				: []
 		);
 
 		const approvementTopics: ReadonlyMap<ApprovementTopicName, ApprovementTopic> = new Map(
-			runtimeConfiguration
-				.getArray("approvement.topic")
-				.map(function (approvementConfiguration: FConfiguration) {
-					const approvement = Settings.readApprovementTopic(approvementConfiguration);
-					return [approvement.name, approvement];
-				})
+			runtimeConfiguration.hasNamespace("approvement.topic") && runtimeConfiguration.has("approvement.topic.indexes")
+				? runtimeConfiguration.getArray("approvement.topic")
+					.map(function (approvementConfiguration: FConfiguration) {
+						const approvement = Settings.readApprovementTopic(approvementConfiguration);
+						return [approvement.name, approvement];
+					})
+				: []
 		);
 
 		const databaseConnectivity: Settings.URLConnectivity = runtimeConfiguration.hasNamespace("database")
@@ -194,35 +196,36 @@ export class Settings {
 			case "slack":
 				throw new FExceptionInvalidOperation("Not implemented yet.");
 			case "telegram": {
-				const approvementTopicIndexers: ReadonlyArray<string> = messengerConfiguration.get("approvementTopicBinding_indexer").asString.split(" ");
-				const approvementTopicBindings: Map<
+				const approvementTopicBindings: Array<Settings.Messenger.Telegram.ApprovementTopicBinding>
+					= messengerConfiguration.hasNamespace("approvementTopicBinding") && messengerConfiguration.has("approvementTopicBinding.indexes")
+						? messengerConfiguration.getArray("approvementTopicBinding")
+							.map(Settings.readApprovementTopicBindingTelegram)
+						: [];
+
+				const approvementTopicBindingsDuplicates: Array<string> = approvementTopicBindings
+					.map(approvementTopicBinding => approvementTopicBinding.bindTopic)
+					.filter((bindTopic, index, arr) => arr.indexOf(bindTopic) !== index); // https://stackoverflow.com/a/32122760/2011679
+
+				if (approvementTopicBindingsDuplicates.length > 0) {
+					const duplicatesText: string = approvementTopicBindingsDuplicates.map(s => `'${s}'`).join(", ");
+					const article: string = duplicatesText.length > 1 ? "are" : "is";
+					throw new FException(`Approvement Topics ${duplicatesText} ${article} trying to bind twice to messenger: ${messengerName}.`);
+				}
+
+				const approvementTopicBindingsMap: Map<
 					Settings.Messenger.Telegram.ApprovementTopicBinding["bindTopic"],
 					Settings.Messenger.Telegram.ApprovementTopicBinding
-				> = new Map();
-				for (const approvementTopicIndexer of approvementTopicIndexers) {
-					const approvementTopicBindingKey: string = `approvementTopicBinding.${approvementTopicIndexer}`;
-					const bindingConfiguration: FConfiguration = messengerConfiguration.getNamespace(approvementTopicBindingKey);
-					const approvementTopicBinding: Settings.Messenger.Telegram.ApprovementTopicBinding = {
-						bindTopic: bindingConfiguration.get("bindTopic").asString,
-						chatId: bindingConfiguration.get("chatId").asString,
-						approvers: bindingConfiguration.has("approvers")
-							? new Set(bindingConfiguration.get("approvers").asString.split(" "))
-							: null,
-						renderTemplate: bindingConfiguration.get("renderTemplate").asString
-					};
-					if (approvementTopicBindings.has(approvementTopicBinding.bindTopic)) {
-						throw new FException(
-							`Approvement Topic Binding name '${approvementTopicBinding.bindTopic}' duplication detected.`,
-						);
-					}
-					approvementTopicBindings.set(approvementTopicBinding.bindTopic, Object.freeze(approvementTopicBinding));
-				}
+				> = new Map(
+					approvementTopicBindings.map(function (approvementTopicBinding: Settings.Messenger.Telegram.ApprovementTopicBinding) {
+						return [approvementTopicBinding.bindTopic, approvementTopicBinding];
+					})
+				);
 
 				return Object.freeze<Settings.Messenger.Telegram>({
 					type: messengerType,
 					name: messengerName,
 					apiToken: messengerConfiguration.get("apiToken").asString,
-					approvementTopicBindings
+					approvementTopicBindings: approvementTopicBindingsMap,
 				});
 			}
 			default:
@@ -241,6 +244,19 @@ export class Settings {
 			expireTimeout: topicConfiguration.get("expireTimeout").asInteger,
 			authType: topicConfiguration.has("authType") ? topicConfiguration.get("authType").asString : null,
 			schema: topicConfiguration.has("schema") ? topicConfiguration.get("schema").asString : null
+		});
+	}
+
+	protected static readApprovementTopicBindingTelegram(
+		approvementTopicBindingConfiguration: FConfiguration,
+	): Settings.Messenger.Telegram.ApprovementTopicBinding {
+		return Object.freeze<Settings.Messenger.Telegram.ApprovementTopicBinding>({
+			bindTopic: approvementTopicBindingConfiguration.get("bindTopic").asString,
+			chatId: approvementTopicBindingConfiguration.get("chatId").asString,
+			approvers: approvementTopicBindingConfiguration.has("approvers")
+				? new Set(approvementTopicBindingConfiguration.get("approvers").asString.split(" "))
+				: null,
+			renderTemplate: approvementTopicBindingConfiguration.get("renderTemplate").asString,
 		});
 	}
 
