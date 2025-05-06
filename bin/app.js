@@ -6,8 +6,8 @@ import {
 	FLoggerConsole,
 } from "@freemework/common";
 import { FDecimalBackendBigNumber } from "@freemework/decimal.bignumberjs";
-import { FLauncher } from "@freemework/hosting";
-import { FSqlConnectionFactoryPostgres } from '@freemework/sql.postgres';
+import { flauncher } from "@freemework/hosting";
+import { FSqlConnectionFactoryPostgres } from "@freemework/sql.postgres";
 
 import fs from "fs";
 import { createRequire } from "module";
@@ -17,9 +17,13 @@ import {
 	Monitoring, MonitoringImpl,
 	LoggerSettings,
 	SingletonProviderExecutionContext,
-	Service, ServiceImpl,
+	ApprovementService, ApprovementServiceImpl,
+	MessengerService, MessengerServiceImpl,
 	Settings,
+	WorkflowCache, WorkflowDatabaseFactory, WorkflowRunner,
+	WorkflowService, WorkflowServiceImpl,
 	bootstrap,
+	messengersFactory,
 } from "../lib/index.js";
 
 import { Activity } from "../lib/2nd/workflow/activities/Activity.js";
@@ -56,13 +60,44 @@ async function createRuntime(bootstrapExecutionContext, settings) {
 		applicationName: `${serviceName} v${serviceVersion}`,
 	});
 
+	const messengers = messengersFactory(settings);
+	const databaseFactory = DatabaseFactory.fromSqlConnectionFactory(sqlConnectionFactory);
+	const workflowCache = WorkflowCache.fromConnectivityUrl(settings.cacheConnectivity.url);
+	const workflowDatabaseFactory = WorkflowDatabaseFactory.fromSqlConnectionFactory(sqlConnectionFactory);
+	const workflowRunner = new WorkflowRunner(
+		workflowCache,
+		workflowDatabaseFactory,
+		// Workflow Runner tags
+		process.env['BUILD_CONFIGURATION'] !== 'release' ? ['dev'] : ['production'],
+	);
+
+	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, MessengerService, new MessengerServiceImpl(messengers));
 	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, FSqlConnectionFactoryPostgres, sqlConnectionFactory);
-	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, DatabaseFactory, DatabaseFactory.fromSqlConnectionFactory(sqlConnectionFactory));
+	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, DatabaseFactory, databaseFactory);
 	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, Monitoring, new MonitoringImpl());
-	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, Service, new ServiceImpl({
-		approvementTopics: settings.approvementTopics,
-		messengers: settings.messengers,
-	}));
+	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, WorkflowDatabaseFactory, workflowDatabaseFactory);
+	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, WorkflowCache, workflowCache);
+	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, ApprovementService, new ApprovementServiceImpl(
+		{
+			approvements: settings.approvements,
+			messengers: settings.messengers,
+		},
+		messengers,
+	));
+	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, WorkflowService, new WorkflowServiceImpl(
+		{
+			workflows: settings.workflows.values(),
+		},
+		{
+			messengers,
+			databaseFactory,
+			workflowCache,
+			workflowDatabaseFactory,
+			workflowRunner,
+			sqlConnectionFactory,
+		}
+	));
+	appExecutionContext = new SingletonProviderExecutionContext(appExecutionContext, WorkflowRunner, workflowRunner);
 
 	const runtime = await bootstrap(
 		appExecutionContext,
@@ -75,4 +110,4 @@ async function createRuntime(bootstrapExecutionContext, settings) {
 }
 
 // Launch the app
-FLauncher(Settings.fromConfiguration, createRuntime);
+flauncher(Settings.fromConfiguration, createRuntime);

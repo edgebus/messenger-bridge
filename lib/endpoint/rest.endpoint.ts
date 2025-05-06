@@ -14,7 +14,7 @@ import bodyParser from "body-parser";
 import { BaseEndpoint } from "./_base.endpoint.js";
 import { Approvement } from "../model/approvement.js";
 import { Settings } from "../settings.js";
-import { Service } from "../service/approvement.service.js";
+import { ApprovementService } from "../service/approvement.service.js";
 import { Bind } from "../utils/bind.js";
 import { Activity, BusinessActivity, CodeActivity, DelayActivity, IfActivity, SequenceActivity, WorkflowApplication, WorkflowCache, WorkflowRunner } from "../2nd/workflow/index.js";
 import { WorkflowDatabaseFactory } from "../2nd/workflow/workflow_database.js";
@@ -23,7 +23,7 @@ import { WorkflowVirtualMachineExecutionContext } from "../2nd/workflow/Workflow
 const ensure: FEnsure = FEnsure.create();
 
 export class RestEndpoint extends BaseEndpoint {
-	private readonly _service: Service;
+	private readonly _service: ApprovementService;
 	private readonly _workflowCache: WorkflowCache;
 	private readonly _workflowDatabaseFactory: WorkflowDatabaseFactory;
 	private readonly _workflowRunner: WorkflowRunner;
@@ -31,7 +31,7 @@ export class RestEndpoint extends BaseEndpoint {
 	public constructor(
 		servers: ReadonlyArray<FWebServer>,
 		opts: Settings.Endpoint.Rest,
-		service: Service,
+		service: ApprovementService,
 		workflowCache: WorkflowCache,
 		workflowDatabaseFactory: WorkflowDatabaseFactory,
 		workflowRunner: WorkflowRunner,
@@ -54,7 +54,7 @@ export class RestEndpoint extends BaseEndpoint {
 
 	@Bind
 	private async _getTopics(_req: express.Request, res: express.Response): Promise<void> {
-		const topis = [...this._service.approvementTopics.values()];
+		const topis = [...this._service.approvements.values()];
 		res.writeHead(200).end(JSON.stringify(topis, null, "\t"));
 	}
 
@@ -102,7 +102,7 @@ export class RestEndpoint extends BaseEndpoint {
 		const approvementId: string = ensure.string(req.params['approvementId']!);
 
 		try {
-			const approvement: Service.ApprovementWithStatus = await this._service
+			const approvement: ApprovementService.ApprovementWithStatus = await this._service
 				.getApprovement(executionContext, topicName, approvementId);
 
 			res.writeHead(200).end(JSON.stringify({
@@ -115,7 +115,7 @@ export class RestEndpoint extends BaseEndpoint {
 				refuseBy: approvement.refuseBy
 			}, null, "\t"));
 		} catch (e) {
-			if (e instanceof Service.NoSuchApprovement) {
+			if (e instanceof ApprovementService.NoSuchApprovement) {
 				res.writeHead(404, e.message).end();
 				return;
 			}

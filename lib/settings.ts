@@ -1,4 +1,10 @@
-import { FExceptionInvalidOperation, FException, FConfiguration, FConfigurationValue, FConfigurationException } from "@freemework/common";
+import {
+	FExceptionInvalidOperation,
+	FException,
+	FConfiguration,
+	FConfigurationValue,
+	FConfigurationException,
+} from "@freemework/common";
 import { FHostingSettings } from "@freemework/hosting";
 
 import * as _ from "lodash";
@@ -19,16 +25,6 @@ export class Settings {
 		public readonly endpoints: ReadonlyArray<Settings.Endpoint>,
 
 		/**
-		 * ???
-		 */
-		public readonly messengers: Settings.MessengerMap,
-
-		/**
-		 * ???
-		 */
-		public readonly approvementTopics: ApprovementTopicMap,
-
-		/**
 		 * URL Connectivity to your Database instance
 		 */
 		public readonly databaseConnectivity: Settings.URLConnectivity,
@@ -37,6 +33,21 @@ export class Settings {
 		 * URL Connectivity to your Cache instance
 		 */
 		public readonly cacheConnectivity: Settings.URLConnectivity,
+
+		/**
+		 * ???
+		 */
+		public readonly approvements: ApprovementTopicMap,
+
+		/**
+		 * Workflows settings
+		 */
+		public readonly workflows: Settings.WorkflowMap,
+
+		/**
+		 * ???
+		 */
+		public readonly messengers: Settings.MessengerMap,
 	) { }
 
 	public static fromConfiguration(configuration: FConfiguration): Settings {
@@ -44,6 +55,14 @@ export class Settings {
 
 		const servers: Array<FHostingSettings.WebServer> = FHostingSettings.fromConfigurationWebServers(runtimeConfiguration);
 		const endpoints: Array<Settings.Endpoint> = runtimeConfiguration.getArray("endpoint").map(Settings.readEndpoint);
+
+		const databaseConnectivity: Settings.URLConnectivity = runtimeConfiguration.hasNamespace("database")
+			? Settings.readUrlConnectivity(runtimeConfiguration.getNamespace("database"))
+			: IN_MEMORY_DATABASE_URL_CONNECTIVITY;
+
+		const cacheConnectivity: Settings.URLConnectivity = runtimeConfiguration.hasNamespace("cache")
+			? Settings.readUrlConnectivity(runtimeConfiguration.getNamespace("cache"))
+			: IN_MEMORY_DATABASE_URL_CONNECTIVITY;
 
 		const messengers: ReadonlyMap<Settings.Messenger["name"], Settings.Messenger> = new Map(
 			runtimeConfiguration.hasNamespace("messenger") && runtimeConfiguration.has("messenger.indexes")
@@ -56,31 +75,34 @@ export class Settings {
 				: []
 		);
 
-		const approvementTopics: ReadonlyMap<ApprovementTopicName, ApprovementTopic> = new Map(
-			runtimeConfiguration.hasNamespace("approvement.topic") && runtimeConfiguration.has("approvement.topic.indexes")
-				? runtimeConfiguration.getArray("approvement.topic")
+		const approvements: ReadonlyMap<ApprovementTopicName, ApprovementTopic> = new Map(
+			runtimeConfiguration.hasNamespace("approvement") && runtimeConfiguration.has("approvement.indexes")
+				? runtimeConfiguration.getArray("approvement")
 					.map(function (approvementConfiguration: FConfiguration) {
-						const approvement = Settings.readApprovementTopic(approvementConfiguration);
+						const approvement = Settings.readApprovement(approvementConfiguration);
 						return [approvement.name, approvement];
 					})
 				: []
 		);
 
-		const databaseConnectivity: Settings.URLConnectivity = runtimeConfiguration.hasNamespace("database")
-			? Settings.readUrlConnectivity(runtimeConfiguration.getNamespace("database"))
-			: IN_MEMORY_DATABASE_URL_CONNECTIVITY;
-
-		const cacheConnectivity: Settings.URLConnectivity = runtimeConfiguration.hasNamespace("cache")
-			? Settings.readUrlConnectivity(runtimeConfiguration.getNamespace("cache"))
-			: IN_MEMORY_DATABASE_URL_CONNECTIVITY;
+		const workflows: ReadonlyMap<Settings.Workflow["name"], Settings.Workflow> = new Map(
+			runtimeConfiguration.hasNamespace("workflow") && runtimeConfiguration.has("workflow.indexes")
+				? runtimeConfiguration.getArray("workflow")
+					.map(function (workflowConfiguration: FConfiguration) {
+						const workflow = Settings.readWorkflow(workflowConfiguration);
+						return [workflow.name, workflow];
+					})
+				: []
+		);
 
 		return new Settings(
 			Object.freeze(servers),
 			Object.freeze(endpoints),
-			Object.freeze(messengers),
-			Object.freeze(approvementTopics),
 			databaseConnectivity,
 			cacheConnectivity,
+			Object.freeze(approvements),
+			Object.freeze(workflows),
+			Object.freeze(messengers),
 		);
 	}
 
@@ -196,36 +218,12 @@ export class Settings {
 			case "slack":
 				throw new FExceptionInvalidOperation("Not implemented yet.");
 			case "telegram": {
-				const approvementTopicBindings: Array<Settings.Messenger.Telegram.ApprovementTopicBinding>
-					= messengerConfiguration.hasNamespace("approvementTopicBinding") && messengerConfiguration.has("approvementTopicBinding.indexes")
-						? messengerConfiguration.getArray("approvementTopicBinding")
-							.map(Settings.readApprovementTopicBindingTelegram)
-						: [];
-
-				const approvementTopicBindingsDuplicates: Array<string> = approvementTopicBindings
-					.map(approvementTopicBinding => approvementTopicBinding.bindTopic)
-					.filter((bindTopic, index, arr) => arr.indexOf(bindTopic) !== index); // https://stackoverflow.com/a/32122760/2011679
-
-				if (approvementTopicBindingsDuplicates.length > 0) {
-					const duplicatesText: string = approvementTopicBindingsDuplicates.map(s => `'${s}'`).join(", ");
-					const article: string = duplicatesText.length > 1 ? "are" : "is";
-					throw new FException(`Approvement Topics ${duplicatesText} ${article} trying to bind twice to messenger: ${messengerName}.`);
-				}
-
-				const approvementTopicBindingsMap: Map<
-					Settings.Messenger.Telegram.ApprovementTopicBinding["bindTopic"],
-					Settings.Messenger.Telegram.ApprovementTopicBinding
-				> = new Map(
-					approvementTopicBindings.map(function (approvementTopicBinding: Settings.Messenger.Telegram.ApprovementTopicBinding) {
-						return [approvementTopicBinding.bindTopic, approvementTopicBinding];
-					})
-				);
-
 				return Object.freeze<Settings.Messenger.Telegram>({
 					type: messengerType,
 					name: messengerName,
 					apiToken: messengerConfiguration.get("apiToken").asString,
-					approvementTopicBindings: approvementTopicBindingsMap,
+					approvementBindings: Settings.readMessengerTelegramApprovementBindings(messengerConfiguration),
+					workflowBindings: Settings.readMessengerTelegramWorkflowBindings(messengerConfiguration),
 				});
 			}
 			default:
@@ -233,7 +231,7 @@ export class Settings {
 		}
 	}
 
-	protected static readApprovementTopic(topicConfiguration: FConfiguration): ApprovementTopic {
+	protected static readApprovement(topicConfiguration: FConfiguration): ApprovementTopic {
 		const topicName: string | null = topicConfiguration.namespaceParent;
 		if (topicName == null) { throw new FExceptionInvalidOperation("Topic configuration must be an array item (contains namespaceParent). BUG?!"); }
 
@@ -247,10 +245,20 @@ export class Settings {
 		});
 	}
 
-	protected static readApprovementTopicBindingTelegram(
+	protected static readWorkflow(topicConfiguration: FConfiguration): Settings.Workflow {
+		const workflowName: string | null = topicConfiguration.namespaceParent;
+		if (workflowName == null) { throw new FExceptionInvalidOperation("Workflow configuration must be an array item (contains namespaceParent). BUG?!"); }
+
+		return Object.freeze<Settings.Workflow>({
+			name: workflowName,
+			entryPointActivityUUID: topicConfiguration.get("entryPointActivityUUID").asString,
+		});
+	}
+
+	protected static readMessengerTelegramApprovementBinding(
 		approvementTopicBindingConfiguration: FConfiguration,
-	): Settings.Messenger.Telegram.ApprovementTopicBinding {
-		return Object.freeze<Settings.Messenger.Telegram.ApprovementTopicBinding>({
+	): Settings.Messenger.Telegram.ApprovementBinding {
+		return Object.freeze<Settings.Messenger.Telegram.ApprovementBinding>({
 			bindTopic: approvementTopicBindingConfiguration.get("bindTopic").asString,
 			chatId: approvementTopicBindingConfiguration.get("chatId").asString,
 			approvers: approvementTopicBindingConfiguration.has("approvers")
@@ -258,6 +266,76 @@ export class Settings {
 				: null,
 			renderTemplate: approvementTopicBindingConfiguration.get("renderTemplate").asString,
 		});
+	}
+
+	protected static readMessengerTelegramApprovementBindings(messengerConfiguration: FConfiguration): Map<
+		Settings.Messenger.Telegram.ApprovementBinding["bindTopic"],
+		Settings.Messenger.Telegram.ApprovementBinding
+	> {
+		const messengerName: string | null = messengerConfiguration.namespaceParent;
+
+		const approvementBindings: Array<Settings.Messenger.Telegram.ApprovementBinding>
+			= messengerConfiguration.hasNamespace("approvementBinding") && messengerConfiguration.has("approvementBinding.indexes")
+				? messengerConfiguration.getArray("approvementBinding")
+					.map(Settings.readMessengerTelegramApprovementBinding)
+				: [];
+
+		const approvementBindingsDuplicates: Array<string> = approvementBindings
+			.map(approvementBinding => approvementBinding.bindTopic)
+			.filter((bindTopic, index, arr) => arr.indexOf(bindTopic) !== index); // https://stackoverflow.com/a/32122760/2011679
+
+		if (approvementBindingsDuplicates.length > 0) {
+			const duplicatesText: string = approvementBindingsDuplicates.map(s => `'${s}'`).join(", ");
+			throw new FException(`Approvements ${duplicatesText} are trying to bind twice to messenger: ${messengerName}.`);
+		}
+
+		return new Map<
+			Settings.Messenger.Telegram.ApprovementBinding["bindTopic"],
+			Settings.Messenger.Telegram.ApprovementBinding
+		>(
+			approvementBindings.map(function (approvementTopicBinding: Settings.Messenger.Telegram.ApprovementBinding) {
+				return [approvementTopicBinding.bindTopic, approvementTopicBinding];
+			})
+		);
+	}
+
+	protected static readMessengerTelegramWorkflowBinding(
+		approvementTopicBindingConfiguration: FConfiguration,
+	): Settings.Messenger.Telegram.WorkflowBinding {
+		return Object.freeze<Settings.Messenger.Telegram.WorkflowBinding>({
+			bindWorkflow: approvementTopicBindingConfiguration.get("bindWorkflow").asString,
+		});
+	}
+
+	protected static readMessengerTelegramWorkflowBindings(messengerConfiguration: FConfiguration): Map<
+		Settings.Messenger.Telegram.WorkflowBinding["bindWorkflow"],
+		Settings.Messenger.Telegram.WorkflowBinding
+	> {
+		const messengerName: string | null = messengerConfiguration.namespaceParent;
+
+		const workflowBindings: Array<Settings.Messenger.Telegram.WorkflowBinding>
+			= messengerConfiguration.hasNamespace("workflowBinding") && messengerConfiguration.has("workflowBinding.indexes")
+				? messengerConfiguration.getArray("workflowBinding")
+					.map(Settings.readMessengerTelegramWorkflowBinding)
+				: [];
+
+		const workflowBindingsDuplicates: Array<string> = workflowBindings
+			.map(workflowBinding => workflowBinding.bindWorkflow)
+			.filter((bindWorkflow, index, arr) => arr.indexOf(bindWorkflow) !== index); // https://stackoverflow.com/a/32122760/2011679
+
+		if (workflowBindingsDuplicates.length > 0) {
+			const duplicatesText: string = workflowBindingsDuplicates.map(s => `'${s}'`).join(", ");
+			throw new FException(`Workflows ${duplicatesText} are trying to bind twice to messenger: ${messengerName}.`);
+		}
+
+		return new Map<
+			Settings.Messenger.Telegram.WorkflowBinding["bindWorkflow"],
+			Settings.Messenger.Telegram.WorkflowBinding
+		>(
+			workflowBindings.map(function (workflowBinding: Settings.Messenger.Telegram.WorkflowBinding) {
+				return [workflowBinding.bindWorkflow, workflowBinding];
+			})
+		);
 	}
 
 	protected static readUrlConnectivity(urlConnectivityConfiguration: FConfiguration): Settings.URLConnectivity {
@@ -356,17 +434,24 @@ export namespace Settings {
 
 	export namespace Messenger {
 		export namespace Common {
-			export interface ApprovementTopicBinding {
+			export interface ApprovementBinding {
 				readonly bindTopic: ApprovementTopicName;
 				readonly renderTemplate: string;
+			}
+			export interface WorkflowBinding {
+				readonly bindWorkflow: string;
 			}
 		}
 		export interface Common {
 			readonly type: string;
 			readonly name: string;
-			readonly approvementTopicBindings: ReadonlyMap<
+			readonly approvementBindings: ReadonlyMap<
 				ApprovementTopicName,
-				Common.ApprovementTopicBinding
+				Common.ApprovementBinding
+			>;
+			readonly workflowBindings: ReadonlyMap<
+				string,
+				Common.WorkflowBinding
 			>;
 		}
 		export interface Slack extends Common {
@@ -374,17 +459,24 @@ export namespace Settings {
 			// TODO
 		}
 		export namespace Telegram {
-			export interface ApprovementTopicBinding extends Common.ApprovementTopicBinding {
+			export interface ApprovementBinding extends Common.ApprovementBinding {
 				readonly chatId: string;
 				readonly approvers: Set<string> | null;
+			}
+			export interface WorkflowBinding extends Common.WorkflowBinding {
+				// TBD
 			}
 		}
 		export interface Telegram extends Common {
 			readonly type: "telegram";
 			readonly apiToken: string;
-			readonly approvementTopicBindings: ReadonlyMap<
+			readonly approvementBindings: ReadonlyMap<
 				ApprovementTopicName,
-				Telegram.ApprovementTopicBinding
+				Telegram.ApprovementBinding
+			>;
+			readonly workflowBindings: ReadonlyMap<
+				Telegram.WorkflowBinding["bindWorkflow"],
+				Telegram.WorkflowBinding
 			>;
 		}
 
@@ -395,13 +487,21 @@ export namespace Settings {
 		}
 	}
 	export type Messenger = Messenger.Slack | Messenger.Telegram;
-	export type MessengerMap = ReadonlyMap<Settings.Messenger["name"], Settings.Messenger>;
+	export type MessengerMap = ReadonlyMap<Messenger["name"], Messenger>;
+
+	export interface Workflow {
+		readonly name: string;
+		readonly entryPointActivityUUID: string;
+	}
+	export type WorkflowMap = ReadonlyMap<Workflow["name"], Workflow>;
 
 	export interface URLConnectivity {
-		url: URL;
-		ignoreStartupFailedConnection: boolean;
+		readonly url: URL;
+		readonly ignoreStartupFailedConnection: boolean;
 	}
 }
+
+
 
 export class ConfigurationException extends FException {
 }

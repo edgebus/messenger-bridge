@@ -14,6 +14,7 @@ import { BugDetectedError } from './common.js';
 import { WorkflowApplication } from './workflow_application.js';
 import { WorkflowCache } from './workflow_cache.js';
 import { WorkflowDatabaseFactory, WorkflowDatabase } from './workflow_database.js';
+import { WorkflowIdentifier } from './identifiers.js';
 
 const WORKER_TICK_SLEEP_TIMEOUT = 1000;
 // const SQL_SYNC_TICKS = 32;
@@ -63,12 +64,26 @@ export class WorkflowRunner extends FInitableBase {
 		return this._tags;
 	}
 
+	public async lockWorkflowApplication(
+		executionContext: FExecutionContext,
+		workflowId: WorkflowIdentifier,
+	): Promise<WorkflowApplication> {
+		//
+		return await WorkflowApplication.lockWorkflowApplication(
+			executionContext,
+			this._workflowCache,
+			this._workflowDatabaseFactory,
+			this._tags,
+			workflowId,
+		);
+	}
+
 	public async resumeBreakpoint(
 		executionContext: FExecutionContext,
-		workflowUuid: string,
+		workflowId: WorkflowIdentifier,
 		breakpointOid: string,
 	): Promise<void> {
-		await this._workflowCache.resumeBreakpoint(executionContext, workflowUuid, breakpointOid);
+		await this._workflowCache.resumeBreakpoint(executionContext, workflowId, breakpointOid);
 	}
 
 	protected onInit(): void {

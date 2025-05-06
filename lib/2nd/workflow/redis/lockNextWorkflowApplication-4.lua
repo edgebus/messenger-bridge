@@ -1,6 +1,8 @@
 --[[
 
-https://www.howtocreate.co.uk/tutorials/jsexamples/syntax/prepareInline.html
+Convert this text into JS:
+
+   https://www.howtocreate.co.uk/tutorials/jsexamples/syntax/prepareInline.html
 
 Получить есклюзивную блокировку над иденификатором `<WF_APP_UUID>` приложения `Workflow App`.
 Для этого LUA процедура делат следующее:

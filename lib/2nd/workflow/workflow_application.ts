@@ -15,10 +15,12 @@ import { v4 as uuid } from 'uuid';
 import { NamedBreakpointActivity, NativeBreakpointActivity } from './activities/BreakpointActivity.js';
 import { WorkflowVirtualMachine1Impl } from './internal/WorkflowVirtualMachine1Impl.js';
 import { Activity, BreakpointActivity, DataContextActivity, NativeActivity } from './activities/index.js';
-import { WorkflowModel } from './models.js';
+// import { WorkflowModel } from './models.js';
+import { Workflow, WorkflowTick, WorkflowStatus } from "./workflow_model.js"
 import { WorkflowCache } from './workflow_cache.js';
 import { WorkflowVirtualMachine } from './WorkflowVirtualMachine.js';
 import { WorkflowDatabaseFactory, WorkflowDatabase } from './workflow_database.js';
+import { ActivityIdentifier, WorkflowIdentifier, WorkflowTickIdentifier } from './identifiers.js';
 
 const __dirname: string = import.meta.dirname;
 const LOCK_TIMEOUT_SECONDS = 64;
@@ -30,14 +32,14 @@ export class WorkflowApplication<TDataContext = {}> {
 	private readonly _logger: FLogger;
 	private readonly _workflowUuid: string;
 	private readonly _wvm: WorkflowVirtualMachine;
-	private _status: WorkflowModel.Status;
+	private _status: WorkflowStatus;
 	private _lastTickDate: Date;
 	/**
 	 * false after persist
 	 */
 	private _isDirty: boolean;
 	private _isUnlocked: boolean;
-	private _prevTickId: WorkflowModel['tickId'] | null;
+	private _prevTickId: WorkflowTickIdentifier | null;
 
 	public static async syncActiveWorkflowApplicationToRedis(
 		executionContext: FExecutionContext,
@@ -58,12 +60,12 @@ export class WorkflowApplication<TDataContext = {}> {
 		//       },
 		//     ),
 		// );
-		const notSyncedWfApps: Array<WorkflowModel> = await workflowDatabaseFactory.using(executionContext,
+		const notSyncedWfApps: Array<Workflow & WorkflowTick> = await workflowDatabaseFactory.using(executionContext,
 			async (dbExecutionContext: FExecutionContext, workflowDatabase: WorkflowDatabase) =>
 				workflowDatabase.getActiveWorkflowApplications(
 					dbExecutionContext,
 					{
-						exclude: activeWfAppUuids,
+						exclude: activeWfAppUuids.map(WorkflowIdentifier.fromUuid),
 					},
 				)
 		);
@@ -79,11 +81,74 @@ export class WorkflowApplication<TDataContext = {}> {
 				await workflowCache.unlockWorkflowApplication(
 					executionContext,
 					WorkflowApplication.lockInstanceName,
-					notSyncedWfApp.workflowUuid,
+					notSyncedWfApp.workflowId,
 					false,
 				);
 			}
 		}
+	}
+
+	public static async lockWorkflowApplication(
+		executionContext: FExecutionContext,
+		workflowCache: WorkflowCache,
+		workflowDatabaseFactory: WorkflowDatabaseFactory,
+		workerTags: ReadonlyArray<string>,
+		workflowId: WorkflowIdentifier,
+	): Promise<WorkflowApplication> {
+		// await using db = await workflowDatabaseFactory.create(executionContext);
+
+		return await workflowDatabaseFactory.using(executionContext,
+			async (usingExecutionContext: FExecutionContext, workflowDatabase: WorkflowDatabase): Promise<WorkflowApplication> => {
+				const workflowModel: Workflow & WorkflowTick = await workflowDatabase.getWorkflowById(
+					usingExecutionContext,
+					workflowId,
+				);
+
+				const { workflowActivityId } = workflowModel;
+				const ActivityClass: Activity.Constructor = Activity.getActivityConstructor(workflowActivityId.uuid);
+				const entryPointActivity: Activity = new ActivityClass();
+				if (!(entryPointActivity instanceof NativeActivity)) {
+					throw new FExceptionInvalidOperation("Something wrong. Entrypoint activity is not NativeActivity.");
+				}
+
+				await workflowCache.lockWorkflowApplication(
+					executionContext,
+					WorkflowApplication.lockInstanceName,
+					LOCK_TIMEOUT_SECONDS,
+					workerTags,
+					workflowId,
+				);
+				// try {
+
+				const vmData = workflowModel.workflowTickVirtualMachineSnapshot;
+				return new WorkflowApplication(
+					workflowCache,
+					entryPointActivity,
+					{
+						workflowUuid: workflowId.uuid,
+						vmData,
+						prevTickId: workflowModel.workflowTickId,
+						status: workflowModel.workflowTickStatus,
+					},
+					false,
+				);
+				// } catch (e1) {
+				// 	try {
+				// 		await workflowCache.unlockWorkflowApplication(
+				// 			executionContext,
+				// 			WorkflowApplication.lockInstanceName,
+				// 			workflowId,
+				// 			false,
+				// 		);
+				// 	} catch (e2) {
+				// 		const err1 = FException.wrapIfNeeded(e1);
+				// 		const err2 = FException.wrapIfNeeded(e2);
+				// 		throw new FExceptionAggregate([err1, err2]);
+				// 	}
+				// 	throw e1;
+				// }
+			}
+		);
 	}
 
 	public static async lockNextWorkflowApplication(
@@ -95,17 +160,19 @@ export class WorkflowApplication<TDataContext = {}> {
 		while (true) {
 			// Loop for case: Redis contains stale data
 
-			const workflowUuid: string | null = await workflowCache.lockNextWorkflowApplication(
+			const workflowId: WorkflowIdentifier | null = await workflowCache.lockNextWorkflowApplication(
 				executionContext,
 				WorkflowApplication.lockInstanceName,
 				LOCK_TIMEOUT_SECONDS,
 				workerTags,
 			);
-			if (workflowUuid === null) {
+			if (workflowId === null) {
 				return null;
 			}
 
 			try {
+				const workflowUuid = workflowId.uuid;
+
 				// const workflowModel: WorkflowModel | null = await FSqlConnectionFactoryExecutionContext.of(
 				// 	executionContext,
 				// ).sqlConnectionFactory.usingConnection(
@@ -117,11 +184,11 @@ export class WorkflowApplication<TDataContext = {}> {
 				// 		),
 				// );
 
-				const workflowModel: WorkflowModel | null = await workflowDatabaseFactory.using(executionContext,
+				const workflowModel: Workflow & WorkflowTick | null = await workflowDatabaseFactory.using(executionContext,
 					(usingExecutionContext: FExecutionContext, workflowDatabase: WorkflowDatabase) =>
 						workflowDatabase.findWorkflowById(
 							usingExecutionContext,
-							workflowUuid,
+							workflowId,
 						)
 				);
 
@@ -130,12 +197,12 @@ export class WorkflowApplication<TDataContext = {}> {
 					await workflowCache.cleanupWorkflowApplication(
 						executionContext,
 						WorkflowApplication.lockInstanceName,
-						workflowUuid,
+						workflowId,
 					);
 					continue;
 				} else {
-					const { activityUuid } = workflowModel;
-					const ActivityClass: Activity.Constructor = Activity.getActivityConstructor(activityUuid);
+					const { workflowActivityId } = workflowModel;
+					const ActivityClass: Activity.Constructor = Activity.getActivityConstructor(workflowActivityId.uuid);
 					const entryPointActivity: Activity = new ActivityClass();
 					if (!(entryPointActivity instanceof NativeActivity)) {
 						// TODO: crash this wf app
@@ -143,13 +210,13 @@ export class WorkflowApplication<TDataContext = {}> {
 						return null;
 					}
 
-					const vmData = workflowModel.workflowVirtualMachineSnapshot;
+					const vmData = workflowModel.workflowTickVirtualMachineSnapshot;
 
 					return new WorkflowApplication(workflowCache, entryPointActivity, {
 						workflowUuid,
 						vmData,
-						prevTickId: workflowModel.tickId,
-						status: workflowModel.workflowStatus,
+						prevTickId: workflowModel.workflowTickId,
+						status: workflowModel.workflowTickStatus,
 					});
 				}
 			} catch (e1) {
@@ -157,7 +224,7 @@ export class WorkflowApplication<TDataContext = {}> {
 					await workflowCache.unlockWorkflowApplication(
 						executionContext,
 						WorkflowApplication.lockInstanceName,
-						workflowUuid,
+						workflowId,
 						false,
 					);
 				} catch (e2) {
@@ -201,7 +268,7 @@ export class WorkflowApplication<TDataContext = {}> {
 		if (this._lockInstanceName === null) {
 			this._lockInstanceName =
 				process.env["NODE_ENV"] !== 'production'
-					? `${os.hostname()}:${path.normalize(path.join(__dirname, '..', '..', '..', '..'))}:pid${process.pid}`
+					? `${os.hostname()}:${path.normalize(path.join(__dirname, '..', '..', '..', '..'))}`
 					: `${os.hostname()}:pid${process.pid}`;
 		}
 
@@ -216,6 +283,7 @@ export class WorkflowApplication<TDataContext = {}> {
 			| string
 			| WorkflowApplication.Initialize<TDataContext>
 			| WorkflowApplication.Restore,
+		isDirty: boolean = true,
 	) {
 		this._logger = FLogger.create(this.constructor.name);
 		this._workflowCache = workflowCache;
@@ -226,13 +294,13 @@ export class WorkflowApplication<TDataContext = {}> {
 				this._workflowUuid = workflowUuidOrRestoreOrInitialize;
 				this._prevTickId = null;
 				this._wvm = new WorkflowVirtualMachine1Impl(entryPoint, null);
-				this._status = WorkflowModel.Status.WORKING;
+				this._status = WorkflowStatus.WORKING;
 			} else if ('prevTickId' in workflowUuidOrRestoreOrInitialize) {
 				const restore: WorkflowApplication.Restore = workflowUuidOrRestoreOrInitialize;
 				this._workflowUuid = restore.workflowUuid;
 				this._prevTickId = restore.prevTickId;
 				this._wvm = new WorkflowVirtualMachine1Impl(entryPoint, restore.vmData);
-				this._status = WorkflowModel.Status.parse(restore.status);
+				this._status = restore.status;// WorkflowStatus.parse(restore.status);
 			} else {
 				const initialize: WorkflowApplication.Initialize<TDataContext> = workflowUuidOrRestoreOrInitialize;
 				const { workflowUuid } = initialize;
@@ -245,17 +313,17 @@ export class WorkflowApplication<TDataContext = {}> {
 						dataContextConstructor.initDataContext(this._wvm, initialize.dataContext);
 					}
 				}
-				this._status = WorkflowModel.Status.WORKING;
+				this._status = WorkflowStatus.WORKING;
 			}
 		} else {
 			this._workflowUuid = uuid();
 			this._prevTickId = null;
 			this._wvm = new WorkflowVirtualMachine1Impl(entryPoint, null);
-			this._status = WorkflowModel.Status.WORKING;
+			this._status = WorkflowStatus.WORKING;
 		}
 
 		this._lastTickDate = new Date();
-		this._isDirty = true;
+		this._isDirty = isDirty;
 		this._isUnlocked = false;
 	}
 
@@ -302,7 +370,7 @@ export class WorkflowApplication<TDataContext = {}> {
 		throw new FExceptionInvalidOperation('Wrong operation. Due currentActivity is not a BreakpointActivity.');
 	}
 
-	public get state(): WorkflowModel.Status {
+	public get state(): WorkflowStatus {
 		this.verifyLocked();
 		return this._status;
 	}
@@ -409,7 +477,7 @@ export class WorkflowApplication<TDataContext = {}> {
 				if (tickActivity instanceof BreakpointActivity) {
 					const isApprovedCurrentBreakpoint = await this._workflowCache.isApprovedBreakpoint(
 						executionContext,
-						this._workflowUuid,
+						WorkflowIdentifier.fromUuid(this._workflowUuid),
 						tickActivity.oid, // this._wvm.getActivityOid(currentActivity)
 					);
 					if (isApprovedCurrentBreakpoint) {
@@ -418,7 +486,7 @@ export class WorkflowApplication<TDataContext = {}> {
 					}
 				}
 
-				this._status = WorkflowModel.Status.WORKING;
+				this._status = WorkflowStatus.WORKING;
 
 				if (this._logger.isDebugEnabled) {
 					const activityTypeName: string = tickActivity.constructor.name;
@@ -437,19 +505,19 @@ export class WorkflowApplication<TDataContext = {}> {
 				this._lastTickDate = new Date();
 
 				if (this._wvm.isTerminated) {
-					this._status = WorkflowModel.Status.TERMINATED;
+					this._status = WorkflowStatus.TERMINATED;
 				} else if (isIdle) {
 					if (this._wvm.currentActivity instanceof NativeBreakpointActivity) {
 						// // В состоянии сна, может быть выполнено еще несколько тиков (напрмер отсылка мерчанту нотификации)
 						// // Т.е. в состоянии SLEEPING выполняются все тики, пока BreakpointActivity не перейдет в isIdle
 						// isIdle = this._wvm.currentActivity.createElement(this._wvm).isIdle;
 
-						this._status = WorkflowModel.Status.SLEEPING;
+						this._status = WorkflowStatus.SLEEPING;
 					}
 				}
 
-				const workflowModel: WorkflowModel = await this.persist(executionContext, workflowDb, nextTickTags, this._prevTickId);
-				this._logger.trace(executionContext, () => `Workflow '${workflowModel.workflowUuid}' was persisted.`);
+				const workflowModel: WorkflowTick = await this.persist(executionContext, workflowDb, nextTickTags, this._prevTickId);
+				this._logger.trace(executionContext, () => `Workflow '${workflowModel.workflowId.value}' was persisted.`);
 
 				if (isIdle || this._wvm.isTerminated) {
 					const activityTypeName: string = tickActivity.constructor.name;
@@ -465,14 +533,18 @@ export class WorkflowApplication<TDataContext = {}> {
 				}
 
 				if (prevActivity !== null && activityHangsCounter >= 16) {
-					console.error(
-						`An hangs activity detected. The activity oid:'${prevActivity.oid}' of type '${prevActivity.constructor.name}' in workflow application '${prevActivity.root.children[0]!.constructor.name}' is executes 16 times. Force idle state.`,
-					);
+					if (this._logger.isErrorEnabled) {
+						const msg = `An hangs activity detected. The activity oid:'${prevActivity.oid}' of type '${prevActivity.constructor.name}' in workflow application '${prevActivity.root.children[0]!.constructor.name}' is executes 16 times. Force idle state.`;
+						this._logger.error(
+							executionContext,
+							msg,
+						);
+					}
 					return;
 				}
 			} catch (e) {
 				this._lastTickDate = new Date();
-				this._status = WorkflowModel.Status.CRASHED;
+				this._status = WorkflowStatus.CRASHED;
 				const err: FException = FException.wrapIfNeeded(e);
 
 				console.error(err);
@@ -505,50 +577,52 @@ export class WorkflowApplication<TDataContext = {}> {
 		executionContext: FExecutionContext,
 		dbFacade: WorkflowDatabase,
 		nextTickTags: ReadonlyArray<string>,
-		prevTickId: WorkflowModel['tickId'] | null = null,
+		prevTickId: WorkflowTickIdentifier | null = null,
 		crashReport: string | null = null,
-	): Promise<WorkflowModel> {
+	): Promise<WorkflowTick & WorkflowTick> {
 		this.verifyLocked();
 
 		const { latestExecutedBreakpoint } = this._wvm;
 
-		let workflowData: WorkflowModel.Data & WorkflowModel.Tick;
+		let workflowData: Workflow.Data & WorkflowTick.Data;
 
 		{
 			// local scope
-			const workflowDataBaseData = {
-				workflowUuid: this._workflowUuid,
-				activityUuid: this._wvm.entryPointActivity.activityUUID,
-				activityVersion: Activity.appVersion,
-				workflowVirtualMachineSnapshot: this._wvm.toJSON(),
-				latestExecutedBreakpoint: latestExecutedBreakpoint !== null ? latestExecutedBreakpoint.name : null,
-				executedAt: this._lastTickDate,
-				nextTickTags,
+			const workflowDataBaseData: Workflow.Data & WorkflowTick.Data._Base = {
+				workflowId: WorkflowIdentifier.fromUuid(this._workflowUuid),
+				workflowActivityId: ActivityIdentifier.fromUuid(this._wvm.entryPointActivity.activityUUID),
+				workflowActivityVersion: Activity.appVersion,
+				// workflowTickPrevId: prevTickId,
+				workflowTickVirtualMachineSnapshot: this._wvm.toJSON(),
+				workflowTickLatestExecutedBreakpoint: latestExecutedBreakpoint !== null ? latestExecutedBreakpoint.name : null,
+				workflowTickExecutedAt: this._lastTickDate,
+				workflowTickNextTickTags: nextTickTags,
 			};
 
-			if (this._status === WorkflowModel.Status.CRASHED) {
+			if (this._status === WorkflowStatus.CRASHED) {
 				if (crashReport === null) {
 					throw new FExceptionArgument('Cannot persist crash state without crash report.', 'crashReport');
 				}
 
 				workflowData = {
 					...workflowDataBaseData,
-					workflowStatus: this._status,
-					crashReport,
+					workflowTickStatus: this._status,
+					workflowTickCrashReport: crashReport,
 				};
 			} else {
 				workflowData = {
 					...workflowDataBaseData,
-					workflowStatus: this._status,
+					workflowTickStatus: this._status,
+					workflowTickCrashReport: null,
 				};
 			}
 		}
 
-		const workflowModel: WorkflowModel = await dbFacade.persistWorkflow(executionContext, workflowData, prevTickId);
-		this._prevTickId = workflowModel.tickId;
+		const workflowModel: WorkflowTick & WorkflowTick = await dbFacade.persistWorkflow(executionContext, workflowData, prevTickId);
+		this._prevTickId = workflowModel.workflowTickId;
 
 		let breakpoint: null | { readonly oid: string; readonly waitTimeout: number } = null;
-		if (this.state === WorkflowModel.Status.SLEEPING && this.currentActivity instanceof NativeBreakpointActivity) {
+		if (this.state === WorkflowStatus.SLEEPING && this.currentActivity instanceof NativeBreakpointActivity) {
 			const { executeCounter } = NativeBreakpointActivity.of(this._wvm);
 			let waitTimeout: number;
 			if (executeCounter < 10) {
@@ -584,12 +658,12 @@ export class WorkflowApplication<TDataContext = {}> {
 		}
 
 		const removeFromProcessing: boolean =
-			this._status === WorkflowModel.Status.TERMINATED || this._status === WorkflowModel.Status.CRASHED;
+			this._status === WorkflowStatus.TERMINATED || this._status === WorkflowStatus.CRASHED;
 
 		await this._workflowCache.unlockWorkflowApplication(
 			executionContext,
 			WorkflowApplication.lockInstanceName,
-			this._workflowUuid,
+			WorkflowIdentifier.fromUuid(this._workflowUuid),
 			removeFromProcessing,
 		);
 	}
@@ -609,8 +683,8 @@ export namespace WorkflowApplication {
 	export interface Restore {
 		readonly vmData: any;
 		readonly workflowUuid: string;
-		readonly prevTickId: WorkflowModel['tickId'];
-		readonly status: WorkflowModel.Status;
+		readonly prevTickId: WorkflowTickIdentifier;
+		readonly status: WorkflowStatus;
 	}
 
 	export class ContractViolationError extends FEnsureException {

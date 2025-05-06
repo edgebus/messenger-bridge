@@ -2,11 +2,25 @@ export { DatabaseFactory } from './database_factory.js';
 export { DatabaseSql } from './database_sql.js';
 export { Database } from './database.js';
 
-import { FExceptionInvalidOperation, FSqlConnectionFactory } from '@freemework/common';
+import { FExceptionInvalidOperation, FExecutionContext, FSqlConnection, FSqlConnectionFactory } from '@freemework/common';
 
 import { DatabaseFactory } from './database_factory.js';
-import { PostgresDatabaseFactory } from './postgres/index.js';
-import { FSqlConnectionFactoryPostgres } from '@freemework/sql.postgres';
+import { Database } from './database.js';
+import { PostgresDatabaseFactory, PostgresDatabase } from './postgres/index.js';
+import { FSqlConnectionFactoryPostgres, FSqlMigrationManagerPostgres } from '@freemework/sql.postgres';
+
+async function createDatabaseSqlConnection(
+	executionContext: FExecutionContext,
+	sqlConnection: FSqlConnection,
+): Promise<Database> {
+	if (sqlConnection.factory instanceof FSqlConnectionFactoryPostgres) {
+		const db = new PostgresDatabase(sqlConnection);
+		await db.init(executionContext);
+		return db;
+	}
+
+	throw new FExceptionInvalidOperation(`Unable to create database instance by sqlConnection '${sqlConnection.constructor.name}'. Not supported yet.`);
+}
 
 function createDatabaseFactoryFromSqlConnectionFactory(sqlConnectionFactory: FSqlConnectionFactory): DatabaseFactory {
 	if (!(sqlConnectionFactory instanceof FSqlConnectionFactoryPostgres)) {
@@ -25,6 +39,7 @@ function createDatabaseFactoryFromConnectivityUrl(connectivityUrl: URL): Databas
 	}
 }
 
+
 declare module "./database_factory.js" {
 	namespace DatabaseFactory {
 		function fromConnectivityUrl(connectivityUrl: URL): DatabaseFactory;
@@ -33,3 +48,14 @@ declare module "./database_factory.js" {
 }
 DatabaseFactory.fromConnectivityUrl = createDatabaseFactoryFromConnectivityUrl;
 DatabaseFactory.fromSqlConnectionFactory = createDatabaseFactoryFromSqlConnectionFactory;
+
+declare module "./database.js" {
+	namespace Database {
+		function fromSqlConnection(
+			executionContext: FExecutionContext,
+			sqlConnection: FSqlConnection,
+		): Promise<Database>;
+	}
+}
+Database.fromSqlConnection = createDatabaseSqlConnection;
+

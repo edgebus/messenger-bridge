@@ -27,10 +27,11 @@ export {
 export { BugDetectedError } from './common.js';
 export { WorkflowApplication } from './workflow_application.js';
 export { WorkflowCache } from './workflow_cache.js';
-// export { WorkflowDatabase } from './workflow_data_persistent_facade.js';
+export { WorkflowDatabaseFactory } from './workflow_database.js';
 export { WorkflowInvoker } from './WorkflowInvoker.js';
 export { WorkflowRunner } from './WorkflowRunner.js';
 export { WorkflowVirtualMachine } from './WorkflowVirtualMachine.js';
+export * from "./identifiers.js";
 
 import { FExceptionInvalidOperation } from '@freemework/common';
 import { WorkflowCache, WorkflowDataCacheFacadeRedis } from './workflow_cache.js';

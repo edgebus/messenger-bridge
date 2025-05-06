@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import * as semver from 'semver';
 
-import { FExceptionArgument, FExceptionInvalidOperation } from '@freemework/common';
+import { FExceptionArgument, FExceptionInvalidOperation, FLogger } from '@freemework/common';
 
 import { WorkflowVirtualMachine } from '../WorkflowVirtualMachine.js';
 
@@ -12,12 +12,14 @@ if (!(activitiesMapSymbol in G)) {
 }
 
 export abstract class Activity {
+	protected readonly _logger: FLogger;
   private static _version: string | null = null;
   private readonly _children: ReadonlyArray<Activity>;
   private _parent: Activity | null = null;
 
   public constructor(...children: ReadonlyArray<Activity>) {
     this._children = Object.freeze(children);
+	this._logger = FLogger.create(this.constructor.name);
 
     for (const childActivity of children) {
       Activity.setParent(childActivity, this);

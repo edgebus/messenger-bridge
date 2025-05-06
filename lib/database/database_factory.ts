@@ -1,4 +1,4 @@
-import { FExceptionInvalidOperation, FExecutionContext, FInitableBase } from '@freemework/common';
+import { FExecutionContext, FInitableBase } from '@freemework/common';
 
 import { Database } from './database.js';
 
@@ -9,7 +9,7 @@ export abstract class DatabaseFactory extends FInitableBase {
 
 	public abstract using<TResult>(
 		executionContext: FExecutionContext,
-		workload: (db: Database) => Promise<TResult>,
+		workload: (executionContext: FExecutionContext, db: Database) => Promise<TResult>,
 	): Promise<TResult>;
 
 	public abstract waitForServer(

@@ -16,8 +16,8 @@ import * as _ from "lodash";
 import { v4 as uuid } from "uuid";
 
 import { Settings } from "../settings.js";
-import { BaseMessenger } from "../messenger/_base.messenger.js";
-import { TelegramMessenger } from "../messenger/telegram.messenger.js";
+import * as messenger from "../messenger/index.js";
+import { Messenger, MessengerApprovement, TelegramMessenger } from "../messenger/index.js";
 import { ApprovementId, ApprovementTopicName } from "../model/primitives.js";
 import { Approvement } from "../model/approvement.js";
 import { Approver } from "../model/approver.js";
@@ -25,8 +25,8 @@ import { ApprovementTopic, ApprovementTopicMap } from "../model/approvement_topi
 import { KeyValueDb, InMemory } from "../database/memory/memory.database.js";
 import { Bind } from "../utils/bind.js";
 
-export abstract class Service extends FInitableBase {
-	public abstract get approvementTopics(): ReadonlyMap<ApprovementTopicName, ApprovementTopic>;
+export abstract class ApprovementService extends FInitableBase {
+	public abstract get approvements(): ReadonlyMap<ApprovementTopicName, ApprovementTopic>;
 
 	public abstract createApprovement(
 		executionContext: FExecutionContext, approvementTopicName: string, renderData: any
@@ -41,27 +41,29 @@ export abstract class Service extends FInitableBase {
 	}>;
 }
 
-export class ServiceImpl extends Service {
+export class ApprovementServiceImpl extends ApprovementService {
 	private readonly _logger: FLogger;
 	private readonly _workerSleepMs: number;
 	// private readonly _configuration: Settings;
 	private readonly _kbDb: KeyValueDb;
 	private readonly _approvementTopics: Map<ApprovementTopicName, ApprovementTopic>;
-	private readonly _messengers: ReadonlyMap<Settings.Messenger["name"], BaseMessenger>;
-	private readonly _activeApprovements: Map<ApprovementId, ServiceInternal.ApprovementBundle>;
-	private readonly _completedApprovements: Map<ApprovementId, ServiceInternal.ApprovementBundle>;
-	private readonly _expiredApprovements: Map<ApprovementId, ServiceInternal.ApprovementBundle>;
+	private readonly _messengers: ReadonlyMap<Settings.Messenger["name"], Messenger>;
+	private readonly _activeApprovements: Map<ApprovementId, _internal_.ApprovementBundle>;
+	private readonly _completedApprovements: Map<ApprovementId, _internal_.ApprovementBundle>;
+	private readonly _expiredApprovements: Map<ApprovementId, _internal_.ApprovementBundle>;
 	private readonly _disposeCancellationTokenSource: FCancellationTokenSourceManual;
 	private _workerTimeout: NodeJS.Timeout | null;
 	private _safeWorkerTask: Promise<void> | null;
 
-	public constructor(settings: {
-		readonly messengers: Settings.MessengerMap;
-		readonly approvementTopics: ApprovementTopicMap;
-	}) {
+	public constructor(
+		settings: {
+			readonly messengers: Settings.MessengerMap;
+			readonly approvements: ApprovementTopicMap;
+		},
+		messengerInstances: ReadonlyMap<Settings.Messenger["name"], Messenger>,
+	) {
 		super();
 		this._logger = FLogger.create(this.constructor.name);
-		// this._configuration = configuration;
 		this._disposeCancellationTokenSource = new FCancellationTokenSourceManual();
 		this._workerSleepMs = 5000;
 		this._workerTimeout = null;
@@ -69,60 +71,40 @@ export class ServiceImpl extends Service {
 
 		this._kbDb = new InMemory();
 
-		const messengers: Map<Settings.Messenger["name"], BaseMessenger> = new Map();
-
 		this._approvementTopics = new Map();
-		for (const [topicName, topicConfiguration] of settings.approvementTopics) {
+		for (const [topicName, topicConfiguration] of settings.approvements) {
 			this._approvementTopics.set(topicName, topicConfiguration);
 		}
 
-		for (const [messengerName, messengerConfiguration] of settings.messengers) {
-			switch (messengerConfiguration.type) {
-				case "slack":
-					throw new FExceptionInvalidOperation("Not implemented yet");
-				case "telegram": {
-					const messenger = new TelegramMessenger(
-						{
-							workerSleepMs: 250,
-							telegramApiToken: messengerConfiguration.apiToken
-						},
-						{
-							...messengerConfiguration,
-							approvementTopics: this._approvementTopics
-						},
-						this._kbDb
-					);
-
-					// Check for existing approvement topics, avoid misconfiguration
-					for (const approvementTopicBinding of messengerConfiguration.approvementTopicBindings.values()) {
-						const approvementTopic: ApprovementTopic | undefined
-							= this._approvementTopics.get(approvementTopicBinding.bindTopic);
-						if (approvementTopic === undefined) {
-							throw new FExceptionInvalidOperation(
-								`Wrong binding approvement topic name '${approvementTopicBinding.bindTopic}' on messenger '${messengerName}'. The topic does not exist.`
-							);
-						}
-					}
-
-					messenger.approveEventChannel.addHandler(this._onApprove);
-					messenger.refuseEventChannel.addHandler(this._onRefuse);
-
-					messengers.set(messengerName, messenger);
-					break;
-				}
-				default:
-					throw new Settings.Messenger.UnreachableMessengerType(messengerConfiguration);
-
+		for (const [messengerName, messenger] of messengerInstances) {
+			const messengerConfiguration: Settings.Messenger | undefined = settings.messengers.get(messengerName);
+			if (messengerConfiguration === undefined) {
+				throw new FExceptionInvalidOperation(`Unable to find messenger '${messengerName}' configuration.`);
 			}
+
+			// Check for existing approvement topics, avoid misconfiguration
+			for (const approvementTopicBinding of messengerConfiguration.approvementBindings.values()) {
+				const approvementTopic: ApprovementTopic | undefined
+					= this._approvementTopics.get(approvementTopicBinding.bindTopic);
+				if (approvementTopic === undefined) {
+					throw new FExceptionInvalidOperation(
+						`Wrong binding approvement topic name '${approvementTopicBinding.bindTopic}' on messenger '${messengerName}'. The topic does not exist.`
+					);
+				}
+			}
+
+			messenger.approvement.addHandler(this._onApprovementDecision);
+			// messenger.approveEventChannel.addHandler(this._onApprove);
+			// messenger.refuseEventChannel.addHandler(this._onRefuse);
 		}
 
-		this._messengers = messengers;
+		this._messengers = messengerInstances;
 		this._activeApprovements = new Map();
 		this._expiredApprovements = new Map();
 		this._completedApprovements = new Map();
 	}
 
-	public get approvementTopics(): ReadonlyMap<ApprovementTopicName, ApprovementTopic> {
+	public get approvements(): ReadonlyMap<ApprovementTopicName, ApprovementTopic> {
 		this.verifyInitializedAndNotDisposed();
 
 		return this._approvementTopics;
@@ -144,10 +126,10 @@ export class ServiceImpl extends Service {
 		const approvementId: ApprovementId = uuid();
 		const expireAt: Date = new Date(Date.now() + approvementTopic.expireTimeout * 1000);
 
-		const approvementMessageTokens: Array<BaseMessenger.ApprovementMessageToken> = [];
+		const approvementMessageTokens: Array<Messenger.ApprovementMessageToken> = [];
 		for (const messenger of this._messengers.values()) {
-			if (messenger.isBoundToApprovementTopic(approvementTopicName)) {
-				const approvementMessageToken: BaseMessenger.ApprovementMessageToken = await messenger.registerApprovement(
+			if (messenger.approvement.isBoundToApprovementTopic(approvementTopicName)) {
+				const approvementMessageToken: Messenger.ApprovementMessageToken = await messenger.approvement.create(
 					executionContext, approvementTopicName, approvementId, renderData
 				);
 				approvementMessageTokens.push(approvementMessageToken);
@@ -186,10 +168,10 @@ export class ServiceImpl extends Service {
 		this.verifyInitializedAndNotDisposed();
 
 		{ // scope
-			const activeApprovementBundle: ServiceInternal.ApprovementBundle | undefined = this._activeApprovements.get(approvementId);
+			const activeApprovementBundle: _internal_.ApprovementBundle | undefined = this._activeApprovements.get(approvementId);
 			if (activeApprovementBundle !== undefined) {
 				if (activeApprovementBundle.approvement.approvementTopic.name !== approvementTopicName) {
-					throw new Service.NoSuchApprovement(approvementId);
+					throw new ApprovementService.NoSuchApprovement(approvementId);
 				}
 
 				return Object.freeze({
@@ -200,10 +182,10 @@ export class ServiceImpl extends Service {
 		}
 
 		{ // scope
-			const expiredApprovementBundle: ServiceInternal.ApprovementBundle | undefined = this._expiredApprovements.get(approvementId);
+			const expiredApprovementBundle: _internal_.ApprovementBundle | undefined = this._expiredApprovements.get(approvementId);
 			if (expiredApprovementBundle !== undefined) {
 				if (expiredApprovementBundle.approvement.approvementTopic.name !== approvementTopicName) {
-					throw new Service.NoSuchApprovement(approvementId);
+					throw new ApprovementService.NoSuchApprovement(approvementId);
 				}
 
 				return Object.freeze({
@@ -214,10 +196,10 @@ export class ServiceImpl extends Service {
 		}
 
 		{ // scope
-			const completedApprovementBundle: ServiceInternal.ApprovementBundle | undefined = this._completedApprovements.get(approvementId);
+			const completedApprovementBundle: _internal_.ApprovementBundle | undefined = this._completedApprovements.get(approvementId);
 			if (completedApprovementBundle !== undefined) {
 				if (completedApprovementBundle.approvement.approvementTopic.name !== approvementTopicName) {
-					throw new Service.NoSuchApprovement(approvementId);
+					throw new ApprovementService.NoSuchApprovement(approvementId);
 				}
 
 				return Object.freeze({
@@ -227,7 +209,7 @@ export class ServiceImpl extends Service {
 			}
 		}
 
-		throw new Service.NoSuchApprovement(approvementId);
+		throw new ApprovementService.NoSuchApprovement(approvementId);
 	}
 
 	protected async onInit(): Promise<void> {
@@ -257,8 +239,9 @@ export class ServiceImpl extends Service {
 		}
 
 		for (const messenger of this._messengers.values()) {
-			messenger.approveEventChannel.removeHandler(this._onApprove);
-			messenger.refuseEventChannel.removeHandler(this._onRefuse);
+			messenger.approvement.removeHandler(this._onApprovementDecision);
+			// messenger.approveEventChannel.removeHandler(this._onApprove);
+			// messenger.refuseEventChannel.removeHandler(this._onRefuse);
 		}
 		await FDisposable.disposeAll(...this._messengers.values());
 
@@ -266,25 +249,34 @@ export class ServiceImpl extends Service {
 	}
 
 	@Bind
-	private async _onApprove(executionContext: FExecutionContext, event: BaseMessenger.ApprovementEvent) {
+	private async _onApprovementDecision(executionContext: FExecutionContext, event: MessengerApprovement.Event) {
+		if (event.data.decision === MessengerApprovement.Decision.APPROVE) {
+			return this._onApprove(executionContext, event.messenger, event.data.approvementId, event.data.approver);
+		} else if (event.data.decision === MessengerApprovement.Decision.REFUSE) {
+			return this._onRefuse(executionContext, event.messenger, event.data.approvementId, event.data.approver);
+		} else {
+			throw new FExceptionInvalidOperation();
+		}
+	}
+
+	// @Bind
+	private async _onApprove(executionContext: FExecutionContext, messenger: Messenger, approvementId: ApprovementId, approver: Approver) {
 		const logger: FLogger = this._logger;
 
-		const approvementBundle: ServiceInternal.ApprovementBundle | undefined = this._activeApprovements.get(event.approvementId);
+		const approvementBundle: _internal_.ApprovementBundle | undefined = this._activeApprovements.get(approvementId);
 		if (approvementBundle === undefined) {
-			logger.warn(executionContext, () => `Unexpected approve event. Approvement with id '${event.approvementId}' does not register.`);
+			logger.warn(executionContext, () => `Unexpected approve event. Approvement with id '${approvementId}' does not register.`);
 			return;
 		}
 
 		const existentApprover: Approver | undefined = approvementBundle.approvement.approvedBy
-			.find(w => w.equalTo(event.data));
+			.find(w => w.equalTo(approver));
 
 		if (
 			(existentApprover !== undefined)
-			|| approvementBundle.approvement.refuseBy !== null && approvementBundle.approvement.refuseBy.equalTo(event.data)
+			|| approvementBundle.approvement.refuseBy !== null && approvementBundle.approvement.refuseBy.equalTo(approver)
 		) {
-			if (logger.isDebugEnabled) {
-				logger.debug(executionContext, () => `Clickable user detected. Data: '${event.data.toString()}'`);
-			}
+			logger.debug(executionContext, () => `Clickable user detected. Data: '${approver.toString()}'`);
 			return;
 		}
 
@@ -292,16 +284,14 @@ export class ServiceImpl extends Service {
 			approvementBundle.approvement.approvedBy.length === approvementBundle.approvement.approvementTopic.requireVotes
 			|| approvementBundle.approvement.refuseBy !== null
 		) {
-			if (logger.isDebugEnabled) {
-				logger.debug(executionContext, () => `Approvement '${event.approvementId}' already completed.`);
-			}
+			logger.debug(executionContext, () => `Approvement '${approvementId}' already completed.`);
 			return;
 		}
 
-		const updatedApprovementBundle: ServiceInternal.ApprovementBundle = Object.freeze({
+		const updatedApprovementBundle: _internal_.ApprovementBundle = Object.freeze({
 			approvement: Object.freeze({
 				...approvementBundle.approvement,
-				approvedBy: Object.freeze([...new Set(approvementBundle.approvement.approvedBy), event.data])
+				approvedBy: Object.freeze([...new Set(approvementBundle.approvement.approvedBy), approver])
 			}),
 			messageTokens: approvementBundle.messageTokens
 		});
@@ -310,13 +300,13 @@ export class ServiceImpl extends Service {
 		if (updatedApprovementBundle.approvement.approvedBy.length < updatedApprovementBundle.approvement.approvementTopic.requireVotes) {
 			// Update approvement
 
-			this._activeApprovements.set(event.approvementId, updatedApprovementBundle);
+			this._activeApprovements.set(approvementId, updatedApprovementBundle);
 
 			for (const messenger of this._messengers.values()) {
-				if (messenger.isBoundToApprovementTopic(updatedApprovementBundle.approvement.approvementTopic.name)) {
-					await messenger.updateApprovement(
+				if (messenger.approvement.isBoundToApprovementTopic(updatedApprovementBundle.approvement.approvementTopic.name)) {
+					await messenger.approvement.update(
 						executionContext,
-						event.approvementId,
+						approvementId,
 						updatedApprovementBundle.approvement.approvedBy
 					);
 				}
@@ -324,14 +314,14 @@ export class ServiceImpl extends Service {
 		} else {
 			// Finalize approvement
 
-			this._activeApprovements.delete(event.approvementId);
-			this._completedApprovements.set(event.approvementId, updatedApprovementBundle);
+			this._activeApprovements.delete(approvementId);
+			this._completedApprovements.set(approvementId, updatedApprovementBundle);
 
 			for (const messenger of this._messengers.values()) {
-				if (messenger.isBoundToApprovementTopic(updatedApprovementBundle.approvement.approvementTopic.name)) {
-					await messenger.closeApprovementAsApprove(
+				if (messenger.approvement.isBoundToApprovementTopic(updatedApprovementBundle.approvement.approvementTopic.name)) {
+					await messenger.approvement.closeAsApprove(
 						executionContext,
-						event.approvementId,
+						approvementId,
 						updatedApprovementBundle.approvement.approvedBy
 					);
 				}
@@ -339,27 +329,27 @@ export class ServiceImpl extends Service {
 		}
 	}
 
-	@Bind
-	private async _onRefuse(executionContext: FExecutionContext, event: BaseMessenger.ApprovementEvent) {
+	// @Bind
+	private async _onRefuse(executionContext: FExecutionContext, messenger: Messenger, approvementId: ApprovementId, approver: Approver) {
 		const logger: FLogger = this._logger;
 
-		const approvementBundle: ServiceInternal.ApprovementBundle | undefined = this._activeApprovements.get(event.approvementId);
+		const approvementBundle: _internal_.ApprovementBundle | undefined = this._activeApprovements.get(approvementId);
 		if (approvementBundle === undefined) {
 			if (logger.isInfoEnabled) {
-				logger.warn(executionContext, () => `Unexpected approve event. Approvement with id '${event.approvementId}' does not register.`);
+				logger.warn(executionContext, () => `Unexpected approve event. Approvement with id '${approvementId}' does not register.`);
 			}
 			return;
 		}
 
 		const existentApprover: Approver | undefined = approvementBundle.approvement.approvedBy
-			.find(w => w.equalTo(event.data));
+			.find(w => w.equalTo(approver));
 
 		if (
 			(existentApprover !== undefined)
-			|| approvementBundle.approvement.refuseBy !== null && approvementBundle.approvement.refuseBy.equalTo(event.data)
+			|| approvementBundle.approvement.refuseBy !== null && approvementBundle.approvement.refuseBy.equalTo(approver)
 		) {
 			if (logger.isDebugEnabled) {
-				logger.debug(executionContext, () => `Clickable user detected. Data: '${event.data.toString()}'`);
+				logger.debug(executionContext, () => `Clickable user detected. Data: '${approver.toString()}'`);
 			}
 			return;
 		}
@@ -369,28 +359,28 @@ export class ServiceImpl extends Service {
 			|| approvementBundle.approvement.refuseBy !== null
 		) {
 			if (logger.isDebugEnabled) {
-				logger.debug(executionContext, () => `Approvement '${event.approvementId}' already completed.`);
+				logger.debug(executionContext, () => `Approvement '${approvementId}' already completed.`);
 			}
 			return;
 		}
 
-		const updatedApprovementBundle: ServiceInternal.ApprovementBundle = Object.freeze({
+		const updatedApprovementBundle: _internal_.ApprovementBundle = Object.freeze({
 			approvement: Object.freeze({
 				...approvementBundle.approvement,
-				refuseBy: event.data
+				refuseBy: approver
 			}),
 			messageTokens: approvementBundle.messageTokens
 		});
 
-		this._activeApprovements.delete(event.approvementId);
-		this._completedApprovements.set(event.approvementId, updatedApprovementBundle);
+		this._activeApprovements.delete(approvementId);
+		this._completedApprovements.set(approvementId, updatedApprovementBundle);
 
 		for (const messenger of this._messengers.values()) {
-			if (messenger.isBoundToApprovementTopic(updatedApprovementBundle.approvement.approvementTopic.name)) {
-				await messenger.closeApprovementAsRefuse(
+			if (messenger.approvement.isBoundToApprovementTopic(updatedApprovementBundle.approvement.approvementTopic.name)) {
+				await messenger.approvement.closeAsRefuse(
 					executionContext,
-					event.approvementId,
-					event.data
+					approvementId,
+					approver
 				);
 			}
 		}
@@ -445,7 +435,7 @@ export class ServiceImpl extends Service {
 			const logger: FLogger = this._logger;
 
 			for (const approvementId of expiredApprovements) {
-				const approvementBundle: ServiceInternal.ApprovementBundle | undefined = this._activeApprovements.get(approvementId);
+				const approvementBundle: _internal_.ApprovementBundle | undefined = this._activeApprovements.get(approvementId);
 				if (approvementBundle === undefined) {
 					logger.error(executionContext, () => "[BUG] Illegal operation at current state. ApprovementBundle marked for expire, but not presents inside approvements dictionary.");
 					continue;
@@ -454,8 +444,8 @@ export class ServiceImpl extends Service {
 				this._expiredApprovements.set(approvementId, approvementBundle);
 
 				for (const messenger of this._messengers.values()) {
-					if (messenger.isBoundToApprovementTopic(approvementBundle.approvement.approvementTopic.name)) {
-						await messenger.closeApprovementAsExpired(
+					if (messenger.approvement.isBoundToApprovementTopic(approvementBundle.approvement.approvementTopic.name)) {
+						await messenger.approvement.closeAsExpired(
 							executionContext,
 							approvementId
 						);
@@ -466,7 +456,7 @@ export class ServiceImpl extends Service {
 	}
 }
 
-export namespace Service {
+export namespace ApprovementService {
 	export type ApprovementWithStatus = Approvement & {
 		readonly status: "PENDING" | "APPROVED" | "REFUSED" | "EXPIRED";
 	};
@@ -483,9 +473,9 @@ export namespace Service {
 	}
 }
 
-namespace ServiceInternal {
+namespace _internal_ {
 	export interface ApprovementBundle {
 		readonly approvement: Approvement;
-		readonly messageTokens: Array<BaseMessenger.ApprovementMessageToken>;
+		readonly messageTokens: Array<Messenger.ApprovementMessageToken>;
 	}
 }

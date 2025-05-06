@@ -21,6 +21,9 @@
 				"<node_internals>/**"
 			],
 			"type": "node",
+			// "console": "integratedTerminal",
+			"sourceMaps": true,
+			"killBehavior": "polite"
 		},
 		{
 			"name": "Attach",

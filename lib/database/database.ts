@@ -1,26 +1,24 @@
 import { FException, FExecutionContext, FInitableBase } from '@freemework/common';
 
-// import {
-//   Application,
-//   ApplicationCheckpoint,
-//   Customer,
-//   DiiaOfferSharing,
-//   DiiaOfferSign,
-//   DiiaOnlineDocRequest,
-//   DiiaOnlineDocRequestWithoutQrCode,
-//   DiiaSignDocs,
-//   DiiaSignDocsWithoutQrCode,
-//   Document,
-//   SystemProperty,
-// } from '@fr';
-import { Mutable } from '../utils/typescript.utils.js';
+import {
+	Dialog,
+	DialogMessage,
+} from '../model/index.js';
 
 export abstract class Database extends FInitableBase {
 
-	//   public abstract createApplication(
-	//     executionContext: FExecutionContext,
-	//     opts: Partial<Application.Id> & Application.Data & Mutable<Customer.Id>,
-	//   ): Promise<Application>;
+	public abstract createDialog(
+		executionContext: FExecutionContext,
+		data: Partial<Dialog.Id> & Dialog.Data
+	): Promise<Dialog>;
+
+	/**
+	 * Add a new dialog message record
+	 */
+	public abstract createDialogMessage(
+		executionContext: FExecutionContext,
+		data: Partial<DialogMessage.Id> & DialogMessage.Data,
+	): Promise<DialogMessage>;
 
 	//   public abstract createApplicationCheckpoint(
 	//     executionContext: FExecutionContext,
@@ -62,10 +60,10 @@ export abstract class Database extends FInitableBase {
 	//     opts: Partial<Document.Id> & Document.Data,
 	//   ): Promise<Document>;
 
-	//   public abstract findApplication(
-	//     executionContext: FExecutionContext,
-	//     opts: Application.Id | Application.DataOrderId | Customer.Id,
-	//   ): Promise<Application | null>;
+	public abstract findDialog(
+		executionContext: FExecutionContext,
+		filter: Dialog.Id | Dialog.MessengerChatToken | { activeOnly: true; },
+	): Promise<Dialog | null>;
 
 	//   public abstract findApplicationStatusAndReturnURL(
 	//     executionContext: FExecutionContext,
@@ -139,9 +137,10 @@ export abstract class Database extends FInitableBase {
 	//     opts: DiiaOfferSign.Id,
 	//   ): Promise<Array<DiiaSignDocsWithoutQrCode>>;
 
-	//   // public abstract listApplication(
-	//   //   executionContext: FExecutionContext,
-	//   // ): Promise<Array<Application>>;
+	// public abstract listDialogs(
+	// 	executionContext: FExecutionContext,
+	// 	opts: Partial<Dialog.Data>,
+	// ): Promise<Array<Dialog>>;
 
 	//   public abstract listDocuments(
 	//     executionContext: FExecutionContext,
@@ -152,6 +151,19 @@ export abstract class Database extends FInitableBase {
 	//     executionContext: FExecutionContext,
 	//   ): Promise<Array<[SystemProperty, unknown]>>;
 
+
+	public abstract getDialogMessage(
+		executionContext: FExecutionContext,
+		filter: DialogMessage.Id,
+	): Promise<DialogMessage>;
+
+	public abstract listDialogMessage(
+		executionContext: FExecutionContext,
+		filter: DialogMessage.Id | Dialog.Id | { isProcessed: boolean },
+		opts: {
+			readonly limit?: number;
+		}
+	): Promise<Array<DialogMessage>>;
 
 	public abstract listVersions(
 		executionContext: FExecutionContext,
@@ -170,6 +182,14 @@ export abstract class Database extends FInitableBase {
 	//       readonly propertyValue: unknown;
 	//     },
 	//   ): Promise<void>;
+
+	/**
+	 * Update dialog message record for set IsProcessed to `true`
+	 */
+	public abstract markDialogMessageAsProcessed(
+		executionContext: FExecutionContext,
+		filter: DialogMessage.Id,
+	): Promise<void>;
 
 
 	public abstract transactionCommit(executionContext: FExecutionContext): Promise<void>;

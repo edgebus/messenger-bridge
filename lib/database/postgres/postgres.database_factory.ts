@@ -79,12 +79,15 @@ export class PostgresDatabaseFactory extends DatabaseFactory {
 	}
 
 	@Bind
-	public async using<TResult>(executionContext: FExecutionContext, worker: (db: Database) => Promise<TResult>): Promise<TResult> {
+	public async using<TResult>(
+		executionContext: FExecutionContext,
+		worker: (dbExecutionContext: FExecutionContext, db: Database) => Promise<TResult>,
+	): Promise<TResult> {
 		super.verifyInitializedAndNotDisposed();
 
 		await using db: Database = await this.create(executionContext);
 		try {
-			const workerResult = await worker(db);
+			const workerResult = await worker(executionContext, db);
 			await db.transactionCommit(executionContext);
 			return workerResult;
 		} catch (e) {

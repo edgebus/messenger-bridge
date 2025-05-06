@@ -1,13 +1,20 @@
-export { createLoggerFactory } from "./utils/logger_factory.js";
 export { LoggerSettings } from "./utils/logger_settings.js";
 export { DatabaseFactory } from "./database/index.js";
 // export { FactoryProviderExecutionContext, FactoryProviderExecutionElement } from "./utils/factory_provider_execution_context.js";
 export { SingletonProviderExecutionContext, SingletonProviderExecutionElement } from "./utils/singleton_provider_execution_context.js";
 export { appInfo } from "./app-info.js";
 export { Monitoring, MonitoringImpl } from "./service/monitoring.service.js";
-export { Service, ServiceImpl } from "./service/approvement.service.js";
+export { ApprovementService, ApprovementServiceImpl } from "./service/approvement.service.js";
+export { MessengerService, MessengerServiceImpl } from "./service/messenger.service.js";
+export { WorkflowService, WorkflowServiceImpl } from "./service/workflow.service.js";
+export { messengersFactory } from "./messenger/index.js";
 export { Settings } from "./settings.js";
 // export { MaskService } from "./utils/mask_service.js"
+export {
+	WorkflowCache,
+	WorkflowDatabaseFactory,
+	WorkflowRunner,
+} from "./2nd/workflow/index.js"
 
 import {
 	FDisposable,
@@ -26,6 +33,7 @@ import express from "express";
 import path from "path";
 
 import { Settings } from "./settings.js";
+import "./business/index.js";
 
 import { MisconfigurationException } from "./exception/misconfiguration.exception.js";
 
@@ -47,8 +55,10 @@ import {
 	StaticContentEndpoint,
 } from "./endpoint/index.js";
 import { Monitoring } from "./service/monitoring.service.js";
-import { Service } from "./service/approvement.service.js";
-import { DatabaseFactory,  } from "./database/index.js";
+import { ApprovementService } from "./service/approvement.service.js";
+import { WorkflowService } from "./service/workflow.service.js";
+
+import { DatabaseFactory, } from "./database/index.js";
 import { WorkflowCache, WorkflowRunner } from "./2nd/workflow/index.js";
 import { WorkflowDatabaseFactory } from "./2nd/workflow/workflow_database.js";
 
@@ -80,23 +90,12 @@ export async function bootstrap(
 
 	const { instance: databaseFactory } = SingletonProviderExecutionContext.of(executionContext, DatabaseFactory);
 	const { instance: monitoring } = SingletonProviderExecutionContext.of(executionContext, Monitoring);
-	const { instance: service } = SingletonProviderExecutionContext.of(executionContext, Service);
+	const { instance: service } = SingletonProviderExecutionContext.of(executionContext, ApprovementService);
+	const { instance: workflowService } = SingletonProviderExecutionContext.of(executionContext, WorkflowService);
 	const { instance: sqlConnectionFactory } = SingletonProviderExecutionContext.of(executionContext, FSqlConnectionFactoryPostgres);
-	
-
-	// const { instance: workflowCache } = SingletonProviderExecutionContext.of(executionContext, WorkflowCache);
-	const workflowCache: WorkflowCache = WorkflowCache.fromConnectivityUrl(settings.cacheConnectivity.url);
-
-	// const { instance: workflowCache } = SingletonProviderExecutionContext.of(executionContext, WorkflowCache);
-	const workflowDatabaseFactory: WorkflowDatabaseFactory = WorkflowDatabaseFactory.fromSqlConnectionFactory(sqlConnectionFactory);
-
-	// const { instance: workflowRunner } = SingletonProviderExecutionContext.of(executionContext, WorkflowRunner);
-	const workflowRunner: WorkflowRunner = new WorkflowRunner(
-		workflowCache,
-		workflowDatabaseFactory,
-		// Workflow Runner tags
-		process.env['BUILD_CONFIGURATION'] !== 'release' ? ['dev'] : ['production'],
-	);
+	const { instance: workflowCache } = SingletonProviderExecutionContext.of(executionContext, WorkflowCache);
+	const { instance: workflowDatabaseFactory } = SingletonProviderExecutionContext.of(executionContext, WorkflowDatabaseFactory);
+	const { instance: workflowRunner } = SingletonProviderExecutionContext.of(executionContext, WorkflowRunner);
 
 	let isConfigured = false;
 
@@ -169,12 +168,9 @@ export async function bootstrap(
 
 		const resources: Array<FInitable> = [];
 
-		if (service instanceof FInitable) {
-			resources.push(service);
-		}
-		if (monitoring instanceof FInitable) {
-			resources.push(monitoring);
-		}
+		if (service instanceof FInitable) { resources.push(service); }
+		if (monitoring instanceof FInitable) { resources.push(monitoring); }
+		if (workflowService instanceof FInitable) { resources.push(workflowService); }
 
 		for (const endpointSettings of settings.endpoints) {
 
