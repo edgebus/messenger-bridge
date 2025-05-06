@@ -7,7 +7,7 @@ import { FWebServer, FWebSocketChannelFactoryEndpoint } from "@freemework/hostin
 
 import * as WebSocket from "ws";
 
-import { Service } from "../service/approvement.service.js";
+import { ApprovementService } from "../service/approvement.service.js";
 import { Settings } from "../settings.js";
 
 //import { fromBuffer, toBuffer } from "../util/ArrayBufferUtils";
@@ -20,7 +20,7 @@ export class WSEndpoint extends FWebSocketChannelFactoryEndpoint {
 	public constructor(
 		servers: ReadonlyArray<FWebServer>,
 		opts: Settings.Endpoint.WebSocket,
-		_service: Service
+		_service: ApprovementService
 	) {
 		super(servers, opts);
 		// this._service = service;

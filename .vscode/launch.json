@@ -2,7 +2,7 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
-			"name": "Debug",
+			"name": "Launch",
 			"envFile": "${workspaceFolder}/.env",
 			"program": "${workspaceRoot}/bin/app.js",
 			"args": [
@@ -13,7 +13,7 @@
 			"runtimeArgs": [
 				"--require",
 				"source-map-support/register",
-				"--inspect=9229",
+				// "--inspect=9229",
 			],
 			"request": "launch",
 			"preLaunchTask": "build",
@@ -21,6 +21,9 @@
 				"<node_internals>/**"
 			],
 			"type": "node",
+			// "console": "integratedTerminal",
+			"sourceMaps": true,
+			"killBehavior": "polite"
 		},
 		{
 			"name": "Attach",

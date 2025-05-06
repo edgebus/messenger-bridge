@@ -1,7 +1,7 @@
 import { FExecutionContext, FUsing as Fusing } from "@freemework/common";
 import { assert } from "chai";
 
-import { InMemory, KeyValueDb } from "../../lib/misc/key_value_db.js";
+import { InMemory, KeyValueDb } from "../../lib/database/memory/memory.database.js";
 
 for (const { dbFactory, name } of [
 	{ name: InMemory.name, dbFactory: () => new InMemory() }

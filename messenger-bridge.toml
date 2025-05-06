@@ -41,3 +41,19 @@
 		type = "websocket"
 		servers = "apiSrv"
 		bindPath = "/ws1"
+
+	[io.edgebus.messenger-bridge.runtime.cache]
+		ignoreStartupFailedConnection = false
+		#url = "memory://"
+		#url = "redis://edgebus-messenger-bridge:pwd@redis.srv:6379/0"
+		#url = "redis+ssl://edgebus-messenger-bridge:pwd@redis.srv:6379/0"
+		#user = ""
+		#password = ""
+
+	[io.edgebus.messenger-bridge.runtime.database]
+		ignoreStartupFailedConnection = false
+		#url = "memory://"
+		#url = "postgres://edgebus-messenger-bridge:pwd@postgres.srv:5432/edgebus"
+		#url = "postgres+ssl://edgebus-messenger-bridge:pwd@postgres.srv:5432/edgebus"
+		#user = ""
+		#password = ""

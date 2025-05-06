@@ -6,28 +6,45 @@
 
 [io.edgebus.messenger-bridge.runtime]
 
-	[io.edgebus.messenger-bridge.runtime.approvement]
+	[io.edgebus.messenger-bridge.runtime.cache]
+		# url = "memory://"
+		url = "redis://127.0.0.1:52001/0"
 
-		[[io.edgebus.messenger-bridge.runtime.approvement.topic]]
-			index = "DeployProduction"
-			description = "Requests to deploy new version of an application."
-			requireVotes = 1
-			expireTimeout = 3600
-			#authType = "???TBD???"
-			schema = """
-	{
-		"appName", "appVersion"
-	}
-	"""
+	[io.edgebus.messenger-bridge.runtime.database]
+		url = "postgres://edgebus-local-messenger-bridge@127.0.0.1:52000/edgebus-local"
+		#url = "memory://"
+		#user = "dev"
+		#password = "devel"
+
+	[[io.edgebus.messenger-bridge.runtime.approvement]]
+		index = "DeployProduction"
+		description = "Requests to deploy new version of an application."
+		requireVotes = 1
+		expireTimeout = 3600
+		#authType = "???TBD???"
+		schema = """
+{
+	"appName", "appVersion"
+}
+"""
+
+	[[io.edgebus.messenger-bridge.runtime.workflow]]
+		index = "HelloWorld2"
+		entryPointActivityUUID = "0ac53c6f-30a7-4cd9-a667-f6272dff44d4"
+
+	# [[io.edgebus.messenger-bridge.runtime.workflow]]
+	# 	index = "6e31f227-c1b8-4755-a027-250229255431"
+
+	# [[io.edgebus.messenger-bridge.runtime.workflow]]
+	# 	index = "9ca83592-20a8-479a-9640-9be7c960913e"
 
 	[[io.edgebus.messenger-bridge.runtime.messenger]]
 		index = "bot1"
 		type = "telegram"
 		#apiToken =
-		approvementTopicBinding_indexer = "topicBinding1"
 
-		[[io.edgebus.messenger-bridge.runtime.messenger.approvementTopicBinding]]
-			index = "topicBinding1"
+		[[io.edgebus.messenger-bridge.runtime.messenger.approvementBinding]]
+			index = "1"
 			bindTopic = "DeployProduction"
 			#chatId = <Telegram's Unique identifier for the target chat or username of the target channel (in the format @channelusername)>
 			#approvers = "user1 user2 user3 userN" // all users if missing
@@ -37,3 +54,12 @@
 <i>Version: </i><b>{{appVersion}}</b>
 Pls, Ignore this test message (detecting memory leaks)
 """
+
+		[[io.edgebus.messenger-bridge.runtime.messenger.workflowBinding]]
+			index = "1"
+			bindWorkflow = "HelloWorld1"
+			bindMode = "command"
+
+		[[io.edgebus.messenger-bridge.runtime.messenger.workflowBinding]]
+			index = "2"
+			bindWorkflow = "HelloWorld2"

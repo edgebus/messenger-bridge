@@ -12,7 +12,7 @@
 	* [ ] Demo usage via WebSocket on Welcome Page
 * [ ] Commander API allows to call external HTTP API via commands in a chat.
 * [ ] Notification API allows to map HTTP callbacks to messages in a chat.
-* [ ] Questionnaire Workflows
+* [ ] Dialog Workflow: Questionnaire, Wizard
 
 ## Quick Start
 
